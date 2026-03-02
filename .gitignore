@@ -1,0 +1,30 @@
+# Virtual environment
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Claude Code
+.claude/
+
+# Docs (local only)
+docs/
+
+# Launcher (local only)
+launcher.bat

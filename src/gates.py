@@ -1,0 +1,40 @@
+def check_gates(data: dict) -> tuple[bool, list[str]]:
+    """Run red flag gate checks on the fetched data.
+
+    Returns:
+        (passed, messages) where passed=False means scoring should be skipped.
+        Messages include both hard failures and soft warnings.
+    """
+    messages = []
+    passed = True
+
+    trailing_eps = data.get("trailing_eps")
+    growth_5y = data.get("growth_5y")
+    current_price = data.get("current_price")
+    trailing_pe = data.get("trailing_pe")
+
+    # Hard gates — block scoring
+    if trailing_eps is None or trailing_eps <= 0:
+        messages.append("Cannot score: negative or zero trailing earnings — PEG ratio is meaningless")
+        passed = False
+
+    if growth_5y is None:
+        messages.append("Cannot score: no 5-year EPS growth estimate available")
+        passed = False
+
+    if growth_5y is not None and growth_5y < 5.0:
+        messages.append(
+            f"PEG analysis not applicable: estimated 5Y growth is {growth_5y:.1f}% (<5%)"
+        )
+        passed = False
+
+    # Soft gates — warnings only
+    if passed and trailing_pe is not None and growth_5y is not None and growth_5y > 0:
+        peg = trailing_pe / growth_5y
+        if peg > 3.0:
+            messages.append(f"Warning: extremely high PEG ratio ({peg:.2f})")
+
+    if current_price is not None and current_price < 5.0:
+        messages.append("Warning: penny stock territory (price < $5)")
+
+    return passed, messages
