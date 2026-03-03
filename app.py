@@ -15,7 +15,7 @@ from src.valuator import (
     compute_historical_pe_series,
 )
 
-_LOGO_SVG = (Path(__file__).parent / "assets" / "logo.svg").read_text()
+_LOGO_PATH = Path(__file__).parent / "assets" / "logo.png"
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -25,16 +25,16 @@ def cached_fetch(ticker: str) -> dict:
 
 
 # --- Page config ---
-st.set_page_config(page_title="ValueLens", page_icon="assets/logo.svg", layout="centered")
-st.markdown(
-    f"<div style='display:flex;align-items:center;gap:10px'>"
-    f"<div style='width:48px;height:48px;flex-shrink:0'>{_LOGO_SVG}</div>"
-    f"<div>"
-    f"<h1 style='margin:0;line-height:1.1'>ValueLens</h1>"
-    f"<p style='margin:0;color:gray;font-size:0.9em'>Stock Fundamentals Analyzer</p>"
-    f"</div></div>",
-    unsafe_allow_html=True,
-)
+st.set_page_config(page_title="ValueLens", page_icon=str(_LOGO_PATH), layout="centered")
+_logo_col, _title_col = st.columns([0.1, 0.9], vertical_alignment="center")
+with _logo_col:
+    st.image(str(_LOGO_PATH), width=48)
+with _title_col:
+    st.markdown(
+        "<h1 style='margin:0;line-height:1.1'>ValueLens</h1>"
+        "<p style='margin:0;color:gray;font-size:0.9em'>Stock Fundamentals Analyzer</p>",
+        unsafe_allow_html=True,
+    )
 
 
 # --- Section 1: Input bar ---
