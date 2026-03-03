@@ -34,7 +34,8 @@ def calculate_valuation(
     peg_result = _peg_implied_fair_value(eps, growth_for_peg or growth_5y)
 
     # Method 2: Growth-Adjusted Historical Percentile
-    hist_result = _historical_adjusted_fair_value(data, eps, growth_5y)
+    hist_growth = custom_growth if custom_growth is not None else growth_5y
+    hist_result = _historical_adjusted_fair_value(data, eps, hist_growth)
 
     # Blend
     peg_price = peg_result["fair_price"]

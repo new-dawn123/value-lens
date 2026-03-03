@@ -23,8 +23,11 @@ def cached_fetch(ticker: str) -> dict:
 
 # --- Page config ---
 st.set_page_config(page_title="ValueLens", layout="centered")
-st.title("ValueLens")
-st.caption("Stock Fundamentals Analyzer")
+st.markdown(
+    "<h1 style='margin-bottom:0'>ValueLens</h1>"
+    "<p style='margin-top:0;color:gray;font-size:0.9em'>Stock Fundamentals Analyzer</p>",
+    unsafe_allow_html=True,
+)
 
 
 # --- Section 1: Input bar ---
