@@ -22,8 +22,9 @@ def cached_fetch(ticker: str) -> dict:
 
 
 # --- Page config ---
-st.set_page_config(page_title="Stock Analyzer", layout="centered")
-st.title("Stock Fundamental Analyzer")
+st.set_page_config(page_title="ValueLens", layout="centered")
+st.title("ValueLens")
+st.caption("Stock Fundamentals Analyzer")
 
 
 # --- Section 1: Input bar ---
