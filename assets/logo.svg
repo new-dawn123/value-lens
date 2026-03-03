@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="lensGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4A90D9"/>
+      <stop offset="100%" stop-color="#2E5FA1"/>
+    </linearGradient>
+    <linearGradient id="chartGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <linearGradient id="handleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B7DD8"/>
+      <stop offset="100%" stop-color="#1E3A5F"/>
+    </linearGradient>
+    <clipPath id="lensClip">
+      <circle cx="52" cy="48" r="30"/>
+    </clipPath>
+  </defs>
+
+  <!-- Lens glass (outer ring) -->
+  <circle cx="52" cy="48" r="34" fill="none" stroke="url(#lensGrad)" stroke-width="6" opacity="0.9"/>
+
+  <!-- Lens glass fill -->
+  <circle cx="52" cy="48" r="30" fill="#F0F7FF" opacity="0.35"/>
+
+  <!-- Chart line inside lens -->
+  <polyline
+    points="28,62 38,58 44,50 50,54 56,38 62,42 70,30"
+    fill="none"
+    stroke="url(#chartGrad)"
+    stroke-width="3.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    clip-path="url(#lensClip)"
+  />
+
+  <!-- Small dot at chart end (latest price) -->
+  <circle cx="70" cy="30" r="3" fill="#10B981" clip-path="url(#lensClip)"/>
+
+  <!-- Fair-value horizontal dashed line inside lens -->
+  <line x1="28" y1="46" x2="76" y2="46"
+    stroke="#4A90D9" stroke-width="1.5" stroke-dasharray="4,3"
+    opacity="0.5" clip-path="url(#lensClip)"/>
+
+  <!-- Handle -->
+  <line x1="76" y1="72" x2="100" y2="96"
+    stroke="url(#handleGrad)" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Glare highlight on glass -->
+  <ellipse cx="40" cy="38" rx="8" ry="5" fill="white" opacity="0.18" transform="rotate(-30 40 38)"/>
+</svg>

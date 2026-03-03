@@ -1,4 +1,5 @@
 import statistics
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -14,6 +15,8 @@ from src.valuator import (
     compute_historical_pe_series,
 )
 
+_LOGO_SVG = (Path(__file__).parent / "assets" / "logo.svg").read_text()
+
 
 @st.cache_data(ttl=900, show_spinner=False)
 def cached_fetch(ticker: str) -> dict:
@@ -22,10 +25,14 @@ def cached_fetch(ticker: str) -> dict:
 
 
 # --- Page config ---
-st.set_page_config(page_title="ValueLens", layout="centered")
+st.set_page_config(page_title="ValueLens", page_icon="assets/logo.svg", layout="centered")
 st.markdown(
-    "<h1 style='margin-bottom:0'>ValueLens</h1>"
-    "<p style='margin-top:0;color:gray;font-size:0.9em'>Stock Fundamentals Analyzer</p>",
+    f"<div style='display:flex;align-items:center;gap:10px'>"
+    f"<div style='width:48px;height:48px;flex-shrink:0'>{_LOGO_SVG}</div>"
+    f"<div>"
+    f"<h1 style='margin:0;line-height:1.1'>ValueLens</h1>"
+    f"<p style='margin:0;color:gray;font-size:0.9em'>Stock Fundamentals Analyzer</p>"
+    f"</div></div>",
     unsafe_allow_html=True,
 )
 
