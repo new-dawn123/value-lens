@@ -8,7 +8,11 @@ import streamlit as st
 from src.data_fetcher import fetch_stock_data
 from src.gates import check_gates
 from src.scorer import apply_price_cap, score_stock
-from src.valuator import calculate_valuation, compute_historical_pe_series
+from src.valuator import (
+    calculate_valuation,
+    compute_historical_forward_pe_series,
+    compute_historical_pe_series,
+)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -82,6 +86,7 @@ if analyze and ticker:
     )
     scores = apply_price_cap(scores, data, valuation)
     pe_series = compute_historical_pe_series(data)
+    fwd_pe_series = compute_historical_forward_pe_series(data)
 
     st.session_state["result"] = {
         "ticker": ticker,
@@ -89,6 +94,7 @@ if analyze and ticker:
         "scores": scores,
         "valuation": valuation,
         "pe_series": pe_series,
+        "fwd_pe_series": fwd_pe_series,
         "gate_messages": gate_messages,
     }
 
@@ -101,6 +107,7 @@ if "result" in st.session_state:
     scores = r["scores"]
     valuation = r["valuation"]
     pe_series = r["pe_series"]
+    fwd_pe_series = r["fwd_pe_series"]
 
     # --- Section 2: Score & Summary ---
     name = data.get("name", ticker)
@@ -243,6 +250,40 @@ if "result" in st.session_state:
         )
 
         st.plotly_chart(fig_pe, use_container_width=True)
+
+    # --- Section 4b: Historical Forward P/E chart ---
+    if fwd_pe_series:
+        fwd_dates = [p["date"] for p in fwd_pe_series]
+        fwd_values = [p["pe"] for p in fwd_pe_series]
+        fwd_median = statistics.median(fwd_values)
+
+        fig_fwd = go.Figure()
+        fig_fwd.add_trace(go.Scatter(
+            x=fwd_dates, y=fwd_values, mode="lines",
+            name="Forward P/E", line=dict(color="#00897B", width=2),
+        ))
+        fig_fwd.add_hline(
+            y=fwd_median, line_dash="dash", line_color="gray",
+            annotation_text=f"Median Fwd P/E {fwd_median:.1f}",
+        )
+
+        current_fwd_pe = data.get("forward_pe")
+        if current_fwd_pe:
+            fig_fwd.add_hline(
+                y=current_fwd_pe, line_dash="dot", line_color="orange",
+                annotation_text=f"Current Fwd P/E {current_fwd_pe:.1f}",
+                annotation_position="bottom right",
+            )
+
+        fig_fwd.update_layout(
+            title=f"{ticker} — Historical Forward P/E",
+            xaxis_title="Date",
+            yaxis_title="Forward P/E",
+            height=350,
+            showlegend=False,
+        )
+
+        st.plotly_chart(fig_fwd, use_container_width=True)
 
     # --- Section 5: Detailed Metrics (expandable) ---
     with st.expander("Detailed Metrics"):

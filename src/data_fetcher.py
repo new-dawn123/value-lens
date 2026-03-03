@@ -59,6 +59,9 @@ def fetch_stock_data(ticker: str) -> dict:
     # Annual EPS history for time-accurate historical P/E
     data["annual_eps_history"] = _get_annual_eps_history(stock)
 
+    # Quarterly EPS history for historical forward P/E
+    data["quarterly_eps_history"] = _get_quarterly_eps_history(stock)
+
     return data
 
 
@@ -269,6 +272,28 @@ def _get_annual_eps_history(stock: yf.Ticker) -> list[dict] | None:
                 if eps_val is not None and pd.notna(eps_val) and float(eps_val) > 0:
                     records.append({"date": date.to_pydatetime(), "eps": float(eps_val)})
             # Sort oldest first
+            records.sort(key=lambda r: r["date"])
+            return records if records else None
+    except Exception:
+        pass
+    return None
+
+
+def _get_quarterly_eps_history(stock: yf.Ticker) -> list[dict] | None:
+    """Get quarterly Diluted EPS from quarterly income statement.
+
+    Returns list of {"date": datetime, "eps": float} sorted oldest-first.
+    Unlike the annual version, individual quarters may have negative EPS
+    (only the 4-quarter sum matters for forward P/E).
+    """
+    try:
+        inc = stock.quarterly_income_stmt
+        if inc is not None and not inc.empty and "Diluted EPS" in inc.index:
+            eps_row = inc.loc["Diluted EPS"]
+            records = []
+            for date, eps_val in eps_row.items():
+                if eps_val is not None and pd.notna(eps_val):
+                    records.append({"date": date.to_pydatetime(), "eps": float(eps_val)})
             records.sort(key=lambda r: r["date"])
             return records if records else None
     except Exception:
