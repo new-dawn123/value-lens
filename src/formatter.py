@@ -9,7 +9,6 @@ def print_output(
     gate_messages: list[str],
     scores: dict,
     valuation: dict,
-    detailed: bool,
 ):
     """Print analysis results to terminal using rich."""
     console = Console(width=65)
@@ -27,10 +26,7 @@ def print_output(
     console.print(header)
     console.print("-" * 58, style="dim")
 
-    if detailed:
-        _print_detailed(console, data, scores, valuation, gate_messages)
-    else:
-        _print_concise(console, data, scores, valuation, gate_messages)
+    _print_detailed(console, data, scores, valuation, gate_messages)
 
     console.print()
 

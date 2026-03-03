@@ -7,7 +7,7 @@ import streamlit as st
 
 from src.data_fetcher import fetch_stock_data
 from src.gates import check_gates
-from src.scorer import score_stock
+from src.scorer import apply_price_cap, score_stock
 from src.valuator import calculate_valuation, compute_historical_pe_series
 
 
@@ -43,6 +43,18 @@ with st.expander("Advanced Options"):
             placeholder="e.g. 5.67",
             help="Override trailing EPS for stocks with GAAP distortions",
         )
+    use_custom_growth = st.checkbox("Override 5Y growth rate")
+    custom_growth = None
+    if use_custom_growth:
+        custom_growth = st.number_input(
+            "Custom 5Y Growth (%)",
+            min_value=0.1,
+            value=15.0,
+            step=0.5,
+            format="%.1f",
+            placeholder="e.g. 15.0",
+            help="Override 5Y growth rate. Bypasses blended growth calculation.",
+        )
 
 
 # --- Orchestration ---
@@ -64,8 +76,11 @@ if analyze and ticker:
             st.error(msg)
         st.stop()
 
-    scores = score_stock(data, custom_eps=custom_eps)
-    valuation = calculate_valuation(data, custom_eps=custom_eps)
+    scores = score_stock(data, custom_eps=custom_eps, custom_growth=custom_growth)
+    valuation = calculate_valuation(
+        data, custom_eps=custom_eps, custom_growth=custom_growth, scores=scores
+    )
+    scores = apply_price_cap(scores, data, valuation)
     pe_series = compute_historical_pe_series(data)
 
     st.session_state["result"] = {

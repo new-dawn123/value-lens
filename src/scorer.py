@@ -3,19 +3,28 @@ from __future__ import annotations
 import math
 
 
-def score_stock(data: dict, custom_eps: float | None = None) -> dict:
+def score_stock(
+    data: dict,
+    custom_eps: float | None = None,
+    custom_growth: float | None = None,
+) -> dict:
     """Score a stock on a 0-100 scale using weighted fundamental metrics.
 
     Returns a dict with individual metric scores, weights, and the final score.
+    When custom_growth is provided, it replaces the blended growth entirely
+    (used as-is, no dampening).
     """
     eps = custom_eps if custom_eps is not None else data.get("trailing_eps", 0)
     growth_5y = data.get("growth_5y", 0)
     trailing_pe = data.get("trailing_pe")
 
-    # Compute blended growth (3-horizon weighted average: 0y 35% + 1y 35% + 5y 30%)
-    blended_growth = _compute_blended_growth(data)
+    # Growth: use custom override or compute blended
+    if custom_growth is not None:
+        blended_growth = custom_growth
+    else:
+        blended_growth = _compute_blended_growth(data)
 
-    # Compute PEG using blended growth
+    # Compute PEG using growth
     if trailing_pe and blended_growth and blended_growth > 0:
         if custom_eps is not None and data.get("current_price"):
             peg = (data["current_price"] / custom_eps) / blended_growth
@@ -216,6 +225,44 @@ def _score_earnings_surprises(earnings_history: list[dict] | None) -> float:
     # 4/4 → 10, 3/4 → 7, 2/4 → 5, 1/4 → 3, 0/4 → 0
     score_map = {4: 10.0, 3: 7.0, 2: 5.0, 1: 3.0, 0: 0.0}
     return score_map.get(beats, round(beat_ratio * 10, 1))
+
+
+def apply_price_cap(scores: dict, data: dict, valuation: dict) -> dict:
+    """Cap the final score based on price position relative to entry/exit.
+
+    Gradual taper:
+      - Price <= entry:  cap = 100 (no restriction)
+      - Entry < price < exit:  cap tapers linearly from 100 to 50
+      - Price >= exit:  cap = 50
+
+    Returns an updated copy of the scores dict with capped final_score and label.
+    The breakdown retains raw component scores for transparency.
+    """
+    price = data.get("current_price")
+    entry = valuation.get("entry_price")
+    exit_ = valuation.get("exit_price")
+
+    if price is None or entry is None or exit_ is None:
+        return scores
+
+    if price <= entry:
+        cap = 100
+    elif price >= exit_:
+        cap = 50
+    else:
+        ratio = (price - entry) / (exit_ - entry)
+        cap = 100 - (ratio * 50)
+
+    raw_score = scores["final_score"]
+    capped_score = max(0, min(int(cap), raw_score))
+
+    result = dict(scores)
+    result["raw_score"] = raw_score
+    result["price_cap"] = round(cap)
+    result["final_score"] = capped_score
+    result["label"] = _score_label(capped_score)
+
+    return result
 
 
 def _score_label(score: int) -> str:

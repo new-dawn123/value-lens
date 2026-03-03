@@ -26,5 +26,6 @@ Thumbs.db
 # Docs (local only)
 docs/
 
-# Launcher (local only)
+# Launchers (local only)
 launcher.bat
+launcher-gui.bat

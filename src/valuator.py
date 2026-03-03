@@ -4,21 +4,34 @@ import math
 import statistics
 
 
-def calculate_valuation(data: dict, custom_eps: float | None = None) -> dict:
+_QUALITY_K = 0.03  # +-15% at extremes
+
+
+def calculate_valuation(
+    data: dict,
+    custom_eps: float | None = None,
+    custom_growth: float | None = None,
+    scores: dict | None = None,
+) -> dict:
     """Calculate fair value, entry price, and exit price.
 
     Blends PEG-implied fair value (60%) with growth-adjusted historical percentile (40%).
+    When custom_growth is provided, uses it directly (no blending/dampening).
+    When scores are provided, applies a quality adjustment multiplier (+-15%).
     """
     eps = custom_eps if custom_eps is not None else data.get("trailing_eps", 0)
     growth_5y = data.get("growth_5y", 0)
     current_price = data.get("current_price", 0)
     beta = data.get("beta", 1.0) or 1.0
 
-    # Compute blended growth for PEG-implied valuation (same logic as scorer)
-    blended_growth = _compute_blended_growth(data)
+    # Growth: use custom override or compute blended
+    if custom_growth is not None:
+        growth_for_peg = custom_growth
+    else:
+        growth_for_peg = _compute_blended_growth(data)
 
-    # Method 1: PEG-Implied Fair Value (uses blended growth)
-    peg_result = _peg_implied_fair_value(eps, blended_growth or growth_5y)
+    # Method 1: PEG-Implied Fair Value
+    peg_result = _peg_implied_fair_value(eps, growth_for_peg or growth_5y)
 
     # Method 2: Growth-Adjusted Historical Percentile
     hist_result = _historical_adjusted_fair_value(data, eps, growth_5y)
@@ -35,6 +48,11 @@ def calculate_valuation(data: dict, custom_eps: float | None = None) -> dict:
         fair_value = hist_price
     else:
         fair_value = None
+
+    # Quality adjustment from non-PEG score components
+    quality_adjustment = _compute_quality_adjustment(scores)
+    if fair_value is not None:
+        fair_value = fair_value * quality_adjustment
 
     # Entry with beta-adjusted margin of safety, Exit with beta-adjusted premium
     margin_of_safety = _calculate_margin(beta)
@@ -53,9 +71,38 @@ def calculate_valuation(data: dict, custom_eps: float | None = None) -> dict:
         "exit_price": exit_price,
         "margin_of_safety": margin_of_safety,
         "exit_premium": exit_premium,
+        "quality_adjustment": quality_adjustment,
         "peg_method": peg_result,
         "historical_method": hist_result,
     }
+
+
+def _compute_quality_adjustment(scores: dict | None) -> float:
+    """Compute quality multiplier from non-PEG score components.
+
+    Uses PSG (30/55), EPS Revisions (15/55), Earnings Surprises (10/55).
+    Maps quality average [0, 10] to multiplier [0.85, 1.15].
+    Returns 1.0 (no adjustment) when scores are not available.
+    """
+    if not scores or "breakdown" not in scores:
+        return 1.0
+
+    breakdown = scores["breakdown"]
+    psg_score = breakdown.get("psg", {}).get("score", 5.0)
+    revision_score = breakdown.get("eps_revisions", {}).get("score", 5.0)
+    surprise_score = breakdown.get("earnings_surprises", {}).get("score", 5.0)
+
+    # Weighted average using original relative weights (excluding PEG)
+    psg_w, rev_w, sur_w = 0.30, 0.15, 0.10
+    total_w = psg_w + rev_w + sur_w
+
+    quality_avg = (
+        psg_score * (psg_w / total_w)
+        + revision_score * (rev_w / total_w)
+        + surprise_score * (sur_w / total_w)
+    )
+
+    return 1.0 + (quality_avg - 5.0) * _QUALITY_K
 
 
 def _dampen_growth(growth: float, k: float = 15.0) -> float:
