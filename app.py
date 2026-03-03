@@ -11,6 +11,12 @@ from src.scorer import score_stock
 from src.valuator import calculate_valuation, compute_historical_pe_series
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def cached_fetch(ticker: str) -> dict:
+    """Cache yfinance data for 15 minutes to avoid rate limits."""
+    return fetch_stock_data(ticker)
+
+
 # --- Page config ---
 st.set_page_config(page_title="Stock Analyzer", layout="centered")
 st.title("Stock Fundamental Analyzer")
@@ -45,7 +51,7 @@ if analyze and ticker:
 
     with st.spinner(f"Fetching data for {ticker}..."):
         try:
-            data = fetch_stock_data(ticker)
+            data = cached_fetch(ticker)
         except Exception as e:
             st.error(f"Error fetching data for {ticker}: {e}")
             st.stop()

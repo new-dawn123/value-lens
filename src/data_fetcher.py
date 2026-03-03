@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import logging
+import time
 import yfinance as yf
 import pandas as pd
 
 # Suppress noisy yfinance HTTP error logs
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
+_MAX_RETRIES = 3
+_BACKOFF_BASE = 2  # seconds: 2, 4, 8
+
 
 def fetch_stock_data(ticker: str) -> dict:
     """Fetch all fundamental data needed for analysis from yfinance."""
-    stock = yf.Ticker(ticker)
-    info = stock.info
+    stock, info = _fetch_info_with_retry(ticker)
 
     if not info or info.get("quoteType") is None:
         raise ValueError(f"Ticker '{ticker}' not found or no data available")
@@ -57,6 +60,20 @@ def fetch_stock_data(ticker: str) -> dict:
     data["annual_eps_history"] = _get_annual_eps_history(stock)
 
     return data
+
+
+def _fetch_info_with_retry(ticker: str) -> tuple[yf.Ticker, dict]:
+    """Fetch ticker info with exponential backoff on rate limits."""
+    for attempt in range(_MAX_RETRIES):
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        # yfinance returns a near-empty dict on rate limit (no quoteType, no shortName)
+        if info and info.get("quoteType") is not None:
+            return stock, info
+        if attempt < _MAX_RETRIES - 1:
+            wait = _BACKOFF_BASE ** (attempt + 1)
+            time.sleep(wait)
+    return stock, info
 
 
 def _get_growth_estimate(stock: yf.Ticker) -> float | None:
