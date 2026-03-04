@@ -386,35 +386,65 @@ if "result" in st.session_state:
         st.markdown("**Valuation Breakdown**")
         peg_mv = valuation["peg_method"]
         hist_mv = valuation["historical_method"]
+        quality_adj = valuation.get("quality_adjustment", 1.0)
+        margin_pct = round(valuation.get("margin_of_safety", 0) * 100)
+        exit_pct = round(valuation.get("exit_premium", 0) * 100)
         val_rows = []
 
         if peg_mv.get("fair_price"):
             val_rows.append({
                 "Method": "PEG-Implied (60%)",
-                "Fair Price": f"${peg_mv['fair_price']:,.2f}",
+                "Value": f"${peg_mv['fair_price']:,.2f}",
                 "Detail": f"Fair P/E = {peg_mv['fair_pe']}",
             })
         if hist_mv.get("fair_price"):
             detail = f"Median P/E = {hist_mv['median_pe']}"
             if hist_mv.get("growth_ratio") and hist_mv["growth_ratio"] != 1.0:
-                detail += f", growth adj = {hist_mv['growth_ratio']}x"
+                detail += f"<br>Growth adj. = {hist_mv['growth_ratio']}x"
             val_rows.append({
                 "Method": "Historical Adj. (40%)",
-                "Fair Price": f"${hist_mv['fair_price']:,.2f}",
+                "Value": f"${hist_mv['fair_price']:,.2f}",
                 "Detail": detail,
             })
+
+        # Pre-quality blended value
+        peg_p = peg_mv.get("fair_price")
+        hist_p = hist_mv.get("fair_price")
+        if peg_p and hist_p:
+            blended_raw = peg_p * 0.6 + hist_p * 0.4
+        elif peg_p:
+            blended_raw = peg_p
+        elif hist_p:
+            blended_raw = hist_p
+        else:
+            blended_raw = None
+
+        if blended_raw is not None:
+            val_rows.append({
+                "Method": "Blended",
+                "Value": f"${blended_raw:,.2f}",
+                "Detail": "60/40 weighted average",
+            })
+
+        if quality_adj != 1.0 and blended_raw is not None:
+            val_rows.append({
+                "Method": "Quality Adjustment",
+                "Value": f"{quality_adj:.2f}x",
+                "Detail": "PSG, revisions, surprises",
+            })
+
         if valuation.get("fair_value"):
             val_rows.append({
-                "Method": "Blended Fair Value",
-                "Fair Price": f"${valuation['fair_value']:,.2f}",
+                "Method": "<b>Fair Value</b>",
+                "Value": f"<b>${valuation['fair_value']:,.2f}</b>",
                 "Detail": "",
             })
 
         if val_rows:
             html = "<table class='val-breakdown'>"
-            html += "<thead><tr><th>Method</th><th>Fair Price</th><th>Detail</th></tr></thead><tbody>"
+            html += "<thead><tr><th>Method</th><th>Value</th><th>Detail</th></tr></thead><tbody>"
             for r_ in val_rows:
-                html += f"<tr><td>{r_['Method']}</td><td>{r_['Fair Price']}</td><td>{r_['Detail']}</td></tr>"
+                html += f"<tr><td>{r_['Method']}</td><td>{r_['Value']}</td><td>{r_['Detail']}</td></tr>"
             html += "</tbody></table>"
             st.markdown(html, unsafe_allow_html=True)
 

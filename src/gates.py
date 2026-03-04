@@ -29,6 +29,19 @@ def check_gates(data: dict) -> tuple[bool, list[str]]:
         passed = False
 
     # Soft gates — warnings only
+    if data.get("fx_converted"):
+        fc = data.get("financial_currency", "?")
+        pc = data.get("currency", "?")
+        fx = data.get("fx_rate", 0)
+        messages.append(
+            f"Warning: financials reported in {fc}, converted to {pc} (rate: {fx:.4f})"
+        )
+    elif data.get("currency_mismatch"):
+        messages.append(
+            "Warning: currency mismatch detected (ADR/foreign listing) — "
+            "historical P/E charts may be unavailable"
+        )
+
     if passed and trailing_pe is not None and growth_5y is not None and growth_5y > 0:
         peg = trailing_pe / growth_5y
         if peg > 3.0:

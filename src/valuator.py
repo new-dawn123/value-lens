@@ -321,9 +321,9 @@ def _historical_adjusted_fair_value(data: dict, eps: float, current_growth: floa
 
     median_pe = statistics.median(historical_pes)
 
-    # Growth adjustment
+    # Growth adjustment (CAGR is currency-agnostic so no FX guard needed)
     if historical_growth and historical_growth > 0 and current_growth and current_growth > 0:
-        growth_ratio = max(current_growth / historical_growth, 0.3)  # Floor at 0.3
+        growth_ratio = max(min(current_growth / historical_growth, 1.2), 0.8)  # Cap ±20%
     else:
         growth_ratio = 1.0  # No adjustment if historical growth unavailable
 

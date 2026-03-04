@@ -62,6 +62,28 @@ def fetch_stock_data(ticker: str) -> dict:
     # Quarterly EPS history for historical forward P/E
     data["quarterly_eps_history"] = _get_quarterly_eps_history(stock)
 
+    # Currency conversion: convert income-statement EPS to price currency
+    price_currency = info.get("currency")
+    financial_currency = info.get("financialCurrency")
+    data["currency"] = price_currency
+    data["financial_currency"] = financial_currency
+    data["fx_converted"] = False
+
+    if (
+        price_currency
+        and financial_currency
+        and price_currency != financial_currency
+    ):
+        fx_rate = _fetch_fx_rate(financial_currency, price_currency)
+        if fx_rate is not None:
+            _convert_eps_history(data["annual_eps_history"], fx_rate)
+            _convert_eps_history(data["quarterly_eps_history"], fx_rate)
+            data["fx_converted"] = True
+            data["fx_rate"] = fx_rate
+
+    # Legacy flag: true when EPS is still in the wrong currency (FX fetch failed)
+    data["currency_mismatch"] = _detect_currency_mismatch(data)
+
     return data
 
 
@@ -299,6 +321,41 @@ def _get_quarterly_eps_history(stock: yf.Ticker) -> list[dict] | None:
     except Exception:
         pass
     return None
+
+
+def _fetch_fx_rate(from_currency: str, to_currency: str) -> float | None:
+    """Fetch current FX rate from yfinance. Returns rate to multiply by."""
+    try:
+        pair = f"{from_currency}{to_currency}=X"
+        info = yf.Ticker(pair).info
+        rate = info.get("regularMarketPrice") or info.get("previousClose")
+        if rate and rate > 0:
+            return float(rate)
+    except Exception:
+        pass
+    return None
+
+
+def _convert_eps_history(eps_history: list[dict] | None, fx_rate: float) -> None:
+    """Convert EPS values in-place by multiplying with fx_rate."""
+    if not eps_history:
+        return
+    for record in eps_history:
+        record["eps"] = record["eps"] * fx_rate
+
+
+def _detect_currency_mismatch(data: dict) -> bool:
+    """Detect if annual EPS is still in a different currency than trailing EPS.
+
+    This is a safety-net check that catches cases where FX conversion failed
+    or was not attempted. Uses a 3x divergence threshold.
+    """
+    annual_eps = data.get("annual_eps_history")
+    trailing_eps = data.get("trailing_eps")
+    if not annual_eps or not trailing_eps or trailing_eps <= 0:
+        return False
+    ratio = annual_eps[-1]["eps"] / trailing_eps
+    return ratio > 3.0 or ratio < 0.33
 
 
 def _safe_float(val) -> float | None:
