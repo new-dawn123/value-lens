@@ -228,7 +228,10 @@ def _get_historical_growth(stock: yf.Ticker) -> float | None:
 
     Priority:
     1. -5y row from growth_estimates (if Yahoo still provides it)
-    2. CAGR computed from annual income statement Diluted EPS
+    2. Log-linear regression on annual Diluted EPS from income statement.
+       Fits ln(EPS) = intercept + slope * t, where slope = ln(1+g).
+       Uses all positive EPS data points (typically 3-4 years) and is more
+       robust than 2-point CAGR to outlier start/end years.
     """
     # Try 1: -5y from growth_estimates
     try:
@@ -242,8 +245,10 @@ def _get_historical_growth(stock: yf.Ticker) -> float | None:
     except Exception:
         pass
 
-    # Try 2: CAGR from annual Diluted EPS (income statement)
+    # Try 2: Log-linear regression on annual Diluted EPS
     try:
+        import numpy as np
+
         inc = stock.income_stmt
         if inc is not None and not inc.empty and "Diluted EPS" in inc.index:
             eps_row = inc.loc["Diluted EPS"]
@@ -255,12 +260,15 @@ def _get_historical_growth(stock: yf.Ticker) -> float | None:
             points.sort(key=lambda x: x[0])
 
             if len(points) >= 2:
-                oldest_date, oldest_eps = points[0]
-                newest_date, newest_eps = points[-1]
-                years = (newest_date - oldest_date).days / 365.25
-                if years >= 1.0 and oldest_eps > 0:
-                    cagr = ((newest_eps / oldest_eps) ** (1.0 / years) - 1) * 100
-                    return round(cagr, 2)
+                span = (points[-1][0] - points[0][0]).days / 365.25
+                if span >= 0.99:
+                    years = np.array(
+                        [(d - points[0][0]).days / 365.25 for d, _ in points]
+                    )
+                    log_eps = np.log(np.array([e for _, e in points]))
+                    slope, _ = np.polyfit(years, log_eps, 1)
+                    cagr = (np.exp(slope) - 1) * 100
+                    return round(float(cagr), 2)
     except Exception:
         pass
 
