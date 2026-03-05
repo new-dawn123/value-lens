@@ -192,9 +192,9 @@ def _make_bar(score: float, width: int = 10) -> str:
 def _score_color(score: int) -> str:
     if score >= 80:
         return "bold green"
-    if score >= 60:
+    if score >= 70:
         return "green"
-    if score >= 40:
+    if score >= 50:
         return "yellow"
     if score >= 20:
         return "red"

@@ -1,15 +1,19 @@
-def check_gates(data: dict) -> tuple[bool, list[str]]:
+from __future__ import annotations
+
+
+def check_gates(data: dict, custom_growth: float | None = None) -> tuple[bool, list[str]]:
     """Run red flag gate checks on the fetched data.
 
     Returns:
         (passed, messages) where passed=False means scoring should be skipped.
         Messages include both hard failures and soft warnings.
+    When custom_growth is provided, it overrides the fetched growth_5y for gate checks.
     """
     messages = []
     passed = True
 
     trailing_eps = data.get("trailing_eps")
-    growth_5y = data.get("growth_5y")
+    growth_5y = custom_growth if custom_growth is not None else data.get("growth_5y")
     current_price = data.get("current_price")
     trailing_pe = data.get("trailing_pe")
 

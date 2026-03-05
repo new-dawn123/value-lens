@@ -78,6 +78,10 @@ def fetch_stock_data(ticker: str) -> dict:
         if fx_rate is not None:
             _convert_eps_history(data["annual_eps_history"], fx_rate)
             _convert_eps_history(data["quarterly_eps_history"], fx_rate)
+            # P/S ratio: Yahoo computes MarketCap / Revenue with mixed currencies
+            # for ADRs/foreign listings. Divide by fx_rate to normalize.
+            if data["ps_ratio"] is not None:
+                data["ps_ratio"] = data["ps_ratio"] / fx_rate
             data["fx_converted"] = True
             data["fx_rate"] = fx_rate
 

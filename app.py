@@ -91,7 +91,7 @@ if analyze and ticker:
             st.error(f"Error fetching data for {ticker}: {e}")
             st.stop()
 
-    passed, gate_messages = check_gates(data)
+    passed, gate_messages = check_gates(data, custom_growth=custom_growth)
 
     if not passed:
         st.error(f"**{ticker} — {data.get('name', 'Unknown')}**")
@@ -210,20 +210,23 @@ if "result" in st.session_state:
         ep = valuation.get("entry_price")
         xp = valuation.get("exit_price")
 
-        if fv:
-            fig.add_hline(
-                y=fv, line_dash="solid", line_color="blue",
-                annotation_text=f"Fair Value ${fv:,.0f}",
-            )
         if ep:
             fig.add_hline(
                 y=ep, line_dash="dash", line_color="green",
                 annotation_text=f"Entry ${ep:,.0f}",
+                annotation_position="bottom right",
+            )
+        if fv:
+            fig.add_hline(
+                y=fv, line_dash="solid", line_color="blue",
+                annotation_text=f"Fair Value ${fv:,.0f}",
+                annotation_position="top right",
             )
         if xp:
             fig.add_hline(
                 y=xp, line_dash="dash", line_color="red",
                 annotation_text=f"Exit ${xp:,.0f}",
+                annotation_position="top right",
             )
 
         fig.update_layout(
@@ -237,7 +240,7 @@ if "result" in st.session_state:
         st.plotly_chart(fig, width="stretch")
 
     # --- Section 4: Historical P/E chart ---
-    if pe_series:
+    if pe_series and len(pe_series) >= 6:
         pe_dates = [p["date"] for p in pe_series]
         pe_values = [p["pe"] for p in pe_series]
         median_pe = statistics.median(pe_values)
@@ -247,17 +250,20 @@ if "result" in st.session_state:
             x=pe_dates, y=pe_values, mode="lines",
             name="P/E", line=dict(color="#9C27B0", width=2),
         ))
+        current_pe = data.get("trailing_pe")
+        median_pos = "top right" if not current_pe or median_pe >= current_pe else "bottom right"
         fig_pe.add_hline(
             y=median_pe, line_dash="dash", line_color="gray",
             annotation_text=f"Median P/E {median_pe:.1f}",
+            annotation_position=median_pos,
         )
 
-        current_pe = data.get("trailing_pe")
         if current_pe:
+            current_pos = "top right" if current_pe >= median_pe else "bottom right"
             fig_pe.add_hline(
                 y=current_pe, line_dash="dot", line_color="orange",
                 annotation_text=f"Current P/E {current_pe:.1f}",
-                annotation_position="bottom right",
+                annotation_position=current_pos,
             )
 
         fig_pe.update_layout(
@@ -269,9 +275,11 @@ if "result" in st.session_state:
         )
 
         st.plotly_chart(fig_pe, width="stretch")
+    else:
+        st.info("Historical P/E chart unavailable — insufficient positive earnings history.")
 
     # --- Section 4b: Historical Forward P/E chart ---
-    if fwd_pe_series:
+    if fwd_pe_series and len(fwd_pe_series) >= 6:
         fwd_dates = [p["date"] for p in fwd_pe_series]
         fwd_values = [p["pe"] for p in fwd_pe_series]
         fwd_median = statistics.median(fwd_values)
@@ -281,17 +289,20 @@ if "result" in st.session_state:
             x=fwd_dates, y=fwd_values, mode="lines",
             name="Forward P/E", line=dict(color="#00897B", width=2),
         ))
+        current_fwd_pe = data.get("forward_pe")
+        fwd_median_pos = "top right" if not current_fwd_pe or fwd_median >= current_fwd_pe else "bottom right"
         fig_fwd.add_hline(
             y=fwd_median, line_dash="dash", line_color="gray",
             annotation_text=f"Median Fwd P/E {fwd_median:.1f}",
+            annotation_position=fwd_median_pos,
         )
 
-        current_fwd_pe = data.get("forward_pe")
         if current_fwd_pe:
+            fwd_current_pos = "top right" if current_fwd_pe >= fwd_median else "bottom right"
             fig_fwd.add_hline(
                 y=current_fwd_pe, line_dash="dot", line_color="orange",
                 annotation_text=f"Current Fwd P/E {current_fwd_pe:.1f}",
-                annotation_position="bottom right",
+                annotation_position=fwd_current_pos,
             )
 
         fig_fwd.update_layout(
@@ -303,6 +314,8 @@ if "result" in st.session_state:
         )
 
         st.plotly_chart(fig_fwd, width="stretch")
+    else:
+        st.info("Historical Forward P/E chart unavailable — insufficient earnings data.")
 
     # --- Section 5: Detailed Metrics (expandable) ---
     with st.expander("Detailed Metrics"):

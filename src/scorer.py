@@ -248,10 +248,10 @@ def apply_price_cap(scores: dict, data: dict, valuation: dict) -> dict:
     if price <= entry:
         cap = 100
     elif price >= exit_:
-        cap = 50
+        cap = 49
     else:
         ratio = (price - entry) / (exit_ - entry)
-        cap = 100 - (ratio * 50)
+        cap = 100 - (ratio * 51)
 
     raw_score = scores["final_score"]
     capped_score = max(0, min(int(cap), raw_score))
@@ -268,9 +268,9 @@ def apply_price_cap(scores: dict, data: dict, valuation: dict) -> dict:
 def _score_label(score: int) -> str:
     if score >= 80:
         return "Strong Buy"
-    if score >= 60:
+    if score >= 70:
         return "Attractive"
-    if score >= 40:
+    if score >= 50:
         return "Hold / Fair Value"
     if score >= 20:
         return "Unattractive"

@@ -31,7 +31,7 @@ def main():
         print(f"Error fetching data for {ticker}: {e}")
         sys.exit(1)
 
-    passed, gate_messages = check_gates(data)
+    passed, gate_messages = check_gates(data, custom_growth=args.growth)
 
     if not passed:
         print_gate_failure(ticker, data.get("name", "Unknown"), gate_messages)
