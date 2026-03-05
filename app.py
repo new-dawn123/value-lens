@@ -51,7 +51,7 @@ with st.form("analyze_form"):
     with col_ticker:
         ticker = st.text_input("Ticker", placeholder="e.g. NVDA", label_visibility="collapsed")
     with col_button:
-        analyze = st.form_submit_button("Analyze", type="primary", use_container_width=True)
+        analyze = st.form_submit_button("Analyze", type="primary", width="stretch")
 
 with st.expander("Advanced Options"):
     use_custom_eps = st.checkbox("Override trailing EPS")
@@ -234,7 +234,7 @@ if "result" in st.session_state:
             showlegend=False,
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # --- Section 4: Historical P/E chart ---
     if pe_series:
@@ -268,7 +268,7 @@ if "result" in st.session_state:
             showlegend=False,
         )
 
-        st.plotly_chart(fig_pe, use_container_width=True)
+        st.plotly_chart(fig_pe, width="stretch")
 
     # --- Section 4b: Historical Forward P/E chart ---
     if fwd_pe_series:
@@ -302,7 +302,7 @@ if "result" in st.session_state:
             showlegend=False,
         )
 
-        st.plotly_chart(fig_fwd, use_container_width=True)
+        st.plotly_chart(fig_fwd, width="stretch")
 
     # --- Section 5: Detailed Metrics (expandable) ---
     with st.expander("Detailed Metrics"):
