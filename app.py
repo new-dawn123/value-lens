@@ -76,7 +76,7 @@ with st.expander("Advanced Options"):
             step=0.5,
             format="%.1f",
             placeholder="e.g. 15.0",
-            help="Override 5Y growth rate. Bypasses blended growth calculation.",
+            help="Override 5Y growth rate. Bypasses dampened 5Y growth calculation.",
         )
 
 
@@ -359,18 +359,18 @@ if "result" in st.session_state:
             "1Y EPS Growth": f"{data['growth_next_year']:.1f}%" if data.get("growth_next_year") else "N/A",
             "5Y Est. Growth": f"{data['growth_5y']:.1f}%" if data.get("growth_5y") else "N/A",
             "Historical CAGR": f"{data['historical_growth_5y']:.1f}%" if data.get("historical_growth_5y") else "N/A",
-            "Blended Growth": f"{scores['blended_growth']:.1f}%" if scores.get("blended_growth") else "N/A",
+            "Eff. Growth (5Y damp.)": f"{scores['blended_growth']:.1f}%" if scores.get("blended_growth") else "N/A",
         })
 
         st.markdown("**Valuation Ratios**")
         _metrics_table({
-            "PEG (blended)": f"{scores['peg']:.2f}" if scores.get("peg") else "N/A",
+            "PEG Ratio (franchise)": f"{scores['peg']:.2f}" if scores.get("peg") else "N/A",
             "PSG Ratio": f"{scores['psg']:.2f}" if scores.get("psg") else "N/A",
         })
 
         st.markdown("**Valuation Model**")
         _metrics_table({
-            "Fair P/E (PEG-implied)": f"{peg_m['fair_pe']:.2f}" if peg_m.get("fair_pe") else "N/A",
+            "Fair P/E (franchise)": f"{peg_m['fair_pe']:.2f}" if peg_m.get("fair_pe") else "N/A",
             "Median P/E (historical)": f"{hist_m['median_pe']:.2f}" if hist_m.get("median_pe") else "N/A",
             "Growth Ratio": f"{hist_m['growth_ratio']:.2f}x" if hist_m.get("growth_ratio") else "N/A",
             "Adjusted P/E (historical)": f"{hist_m['adjusted_pe']:.2f}" if hist_m.get("adjusted_pe") else "N/A",

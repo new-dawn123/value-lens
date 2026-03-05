@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import math
 
+# P/E that a zero-growth company deserves (~perpetuity at 7-8% discount rate).
+# Franchise PEG = (P/E - BASE_PE) / Growth — measures the growth premium only.
+BASE_PE = 12.0
+
 
 def score_stock(
     data: dict,
@@ -11,25 +15,26 @@ def score_stock(
     """Score a stock on a 0-100 scale using weighted fundamental metrics.
 
     Returns a dict with individual metric scores, weights, and the final score.
-    When custom_growth is provided, it replaces the blended growth entirely
+    When custom_growth is provided, it replaces the dampened 5Y growth entirely
     (used as-is, no dampening).
     """
     eps = custom_eps if custom_eps is not None else data.get("trailing_eps", 0)
     growth_5y = data.get("growth_5y", 0)
     trailing_pe = data.get("trailing_pe")
 
-    # Growth: use custom override or compute blended
+    # Growth: use custom override or compute dampened 5Y
     if custom_growth is not None:
-        blended_growth = custom_growth
+        effective_growth = custom_growth
     else:
-        blended_growth = _compute_blended_growth(data)
+        effective_growth = _compute_effective_growth(data)
 
-    # Compute PEG using growth
-    if trailing_pe and blended_growth and blended_growth > 0:
+    # Compute Franchise PEG: (P/E - BASE_PE) / Growth
+    if trailing_pe and effective_growth and effective_growth > 0:
         if custom_eps is not None and data.get("current_price"):
-            peg = (data["current_price"] / custom_eps) / blended_growth
+            actual_pe = data["current_price"] / custom_eps
         else:
-            peg = trailing_pe / blended_growth
+            actual_pe = trailing_pe
+        peg = max(actual_pe - BASE_PE, 0) / effective_growth
     else:
         peg = None
 
@@ -50,6 +55,9 @@ def score_stock(
     psg_score = _score_psg(psg, using_psg)
     revision_score = _score_eps_revisions(data.get("eps_revisions"))
     surprise_score = _score_earnings_surprises(data.get("earnings_history"))
+
+    # Expose effective growth used for PEG (dampened 5Y or custom)
+    blended_growth = effective_growth
 
     # Weighted combination
     weights = {
@@ -100,33 +108,23 @@ def _dampen_growth(growth: float, k: float = 15.0) -> float:
     return k * math.log(1 + growth / k)
 
 
-def _compute_blended_growth(data: dict) -> float | None:
-    """Compute 3-horizon blended growth for PEG: 0y (35%) + +1y (35%) + 5y dampened (30%).
+def _compute_effective_growth(data: dict) -> float | None:
+    """Compute effective growth for franchise PEG: dampened 5Y estimate.
 
-    Near-term (0y, +1y) are undampened — grounded in observable/near-term data.
-    Long-term (5y) is log-dampened to compress aggressive projections.
-    If any component is missing, its weight is redistributed proportionally.
-    Returns None if no growth data is available at all.
+    Uses only the long-term 5Y growth estimate, log-dampened to compress
+    aggressive analyst projections.  Near-term (0Y, +1Y) are intentionally
+    excluded — they add noise without improving the PEG signal, and the
+    franchise PEG with base P/E already accounts for the present value of
+    current earnings.
+
+    Returns None if no 5Y growth data is available.
     """
-    growth_0y = data.get("growth_current_year")
-    growth_1y = data.get("growth_next_year")
     growth_5y = data.get("growth_5y")
 
-    # Build components: near-term raw, long-term dampened
-    components = []
-    if growth_0y and growth_0y > 0:
-        components.append((growth_0y, 0.35))
-    if growth_1y and growth_1y > 0:
-        components.append((growth_1y, 0.35))
-    if growth_5y and growth_5y > 0:
-        components.append((_dampen_growth(growth_5y), 0.30))
-
-    if not components:
+    if not growth_5y or growth_5y <= 0:
         return None
 
-    # Normalize weights if some components are missing
-    total_weight = sum(w for _, w in components)
-    return sum(val * (w / total_weight) for val, w in components)
+    return _dampen_growth(growth_5y)
 
 
 def _score_peg(peg: float | None) -> float:

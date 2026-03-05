@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import statistics
 
+from src.scorer import BASE_PE
 
 _QUALITY_K = 0.03  # +-15% at extremes
 
@@ -15,8 +16,8 @@ def calculate_valuation(
 ) -> dict:
     """Calculate fair value, entry price, and exit price.
 
-    Blends PEG-implied fair value (60%) with growth-adjusted historical percentile (40%).
-    When custom_growth is provided, uses it directly (no blending/dampening).
+    Blends franchise PEG fair value (60%) with growth-adjusted historical percentile (40%).
+    When custom_growth is provided, uses it directly (no dampening).
     When scores are provided, applies a quality adjustment multiplier (+-15%).
     """
     eps = custom_eps if custom_eps is not None else data.get("trailing_eps", 0)
@@ -24,11 +25,11 @@ def calculate_valuation(
     current_price = data.get("current_price", 0)
     beta = data.get("beta", 1.0) or 1.0
 
-    # Growth: use custom override or compute blended
+    # Growth: use custom override or compute dampened 5Y
     if custom_growth is not None:
         growth_for_peg = custom_growth
     else:
-        growth_for_peg = _compute_blended_growth(data)
+        growth_for_peg = _compute_effective_growth(data)
 
     # Method 1: PEG-Implied Fair Value
     peg_result = _peg_implied_fair_value(eps, growth_for_peg or growth_5y)
@@ -113,25 +114,14 @@ def _dampen_growth(growth: float, k: float = 15.0) -> float:
     return k * math.log(1 + growth / k)
 
 
-def _compute_blended_growth(data: dict) -> float | None:
-    """Compute 3-horizon blended growth: 0y (35%) + +1y (35%) + 5y dampened (30%)."""
-    growth_0y = data.get("growth_current_year")
-    growth_1y = data.get("growth_next_year")
+def _compute_effective_growth(data: dict) -> float | None:
+    """Compute effective growth for franchise PEG: dampened 5Y estimate."""
     growth_5y = data.get("growth_5y")
 
-    components = []
-    if growth_0y and growth_0y > 0:
-        components.append((growth_0y, 0.35))
-    if growth_1y and growth_1y > 0:
-        components.append((growth_1y, 0.35))
-    if growth_5y and growth_5y > 0:
-        components.append((_dampen_growth(growth_5y), 0.30))
-
-    if not components:
+    if not growth_5y or growth_5y <= 0:
         return None
 
-    total_weight = sum(w for _, w in components)
-    return sum(val * (w / total_weight) for val, w in components)
+    return _dampen_growth(growth_5y)
 
 
 def compute_historical_pe_series(data: dict) -> list[dict]:
@@ -289,11 +279,15 @@ def compute_historical_forward_pe_series(data: dict) -> list[dict]:
 
 
 def _peg_implied_fair_value(eps: float, growth: float) -> dict:
-    """PEG=1 implies Fair P/E = Growth Rate. Fair Price = Fair P/E * EPS."""
+    """Franchise PEG=1 implies Fair P/E = BASE_PE + Growth.
+
+    The base P/E captures the perpetuity value of current earnings.
+    Growth adds incremental P/E for expected earnings expansion.
+    """
     if not eps or eps <= 0 or not growth or growth <= 0:
         return {"fair_pe": None, "fair_price": None}
 
-    fair_pe = max(growth, 8.0)  # Floor at P/E of 8
+    fair_pe = BASE_PE + growth
     fair_price = round(fair_pe * eps, 2)
 
     return {"fair_pe": round(fair_pe, 2), "fair_price": fair_price}

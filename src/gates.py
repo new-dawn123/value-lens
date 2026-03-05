@@ -26,9 +26,9 @@ def check_gates(data: dict, custom_growth: float | None = None) -> tuple[bool, l
         messages.append("Cannot score: no 5-year EPS growth estimate available")
         passed = False
 
-    if growth_5y is not None and growth_5y < 5.0:
+    if growth_5y is not None and growth_5y < 3.0:
         messages.append(
-            f"PEG analysis not applicable: estimated 5Y growth is {growth_5y:.1f}% (<5%)"
+            f"PEG analysis not applicable: estimated 5Y growth is {growth_5y:.1f}% (<3%)"
         )
         passed = False
 

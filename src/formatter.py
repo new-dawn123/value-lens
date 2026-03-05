@@ -92,9 +92,9 @@ def _print_detailed(
     _add_metric_row(metrics_table, "0Y EPS Growth", data.get("growth_current_year"), suffix="%", fmt=".1f")
     _add_metric_row(metrics_table, "+1Y EPS Growth", data.get("growth_next_year"), suffix="%", fmt=".1f")
     _add_metric_row(metrics_table, "5Y Est. Growth", data.get("growth_5y"), suffix="%", fmt=".1f")
-    _add_metric_row(metrics_table, "Blended Growth", scores.get("blended_growth"), suffix="%", fmt=".1f")
+    _add_metric_row(metrics_table, "Eff. Growth (5Y dampened)", scores.get("blended_growth"), suffix="%", fmt=".1f")
     if scores["peg"] is not None:
-        metrics_table.add_row("PEG Ratio (blended)", f"{scores['peg']:.2f}  (Trailing P/E / Blended Growth)")
+        metrics_table.add_row("PEG Ratio (franchise)", f"{scores['peg']:.2f}  ((P/E - 12) / Eff. Growth)")
     _add_metric_row(metrics_table, "P/S Ratio", data.get("ps_ratio"), fmt=".2f")
     if scores["psg"] is not None:
         psg_label = "PSG Ratio" if scores["using_psg"] else "P/S (raw)"

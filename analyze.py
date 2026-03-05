@@ -19,7 +19,7 @@ def main():
     )
     parser.add_argument(
         "--growth", type=float, default=None,
-        help="Override 5Y growth rate (e.g., 15.0 for 15%%). Bypasses blended growth."
+        help="Override 5Y growth rate (e.g., 15.0 for 15%%). Bypasses dampened 5Y growth."
     )
     args = parser.parse_args()
 
