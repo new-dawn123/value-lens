@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import statistics
 
-from src.scorer import BASE_PE
+from src.scorer import BASE_PE, _GROWTH_DAMPEN_K, _fair_pe
 
 _QUALITY_K = 0.03  # +-15% at extremes
 
@@ -16,45 +16,39 @@ def calculate_valuation(
 ) -> dict:
     """Calculate fair value, entry price, and exit price.
 
-    Blends franchise PEG fair value (60%) with growth-adjusted historical percentile (40%).
-    When custom_growth is provided, uses it directly (no dampening).
-    When scores are provided, applies a quality adjustment multiplier (+-15%).
+    Single-flow approach:
+        fair_value = PEG_fair_price × historical_premium × quality_adjustment
+
+    1. PEG fair price: BASE_PE × (1 + dampened_growth/100)^5 × EPS
+    2. Historical premium: median_actual_PE / model_fair_PE(raw_historical_growth)
+       — captures persistent market premium/discount (moat, quality, etc.)
+       — clamped [0.85, 1.15], defaults to 1.0 when data is insufficient.
+    3. Quality adjustment: ±15% from PSG/revisions/surprises scores.
+
+    Custom growth is dampened the same way as fetched growth.
     """
     eps = custom_eps if custom_eps is not None else data.get("trailing_eps", 0)
-    growth_5y = data.get("growth_5y", 0)
-    current_price = data.get("current_price", 0)
     beta = data.get("beta", 1.0) or 1.0
 
-    # Growth: use custom override or compute dampened 5Y
+    # Growth: use custom override (dampened) or compute dampened 5Y
     if custom_growth is not None:
-        growth_for_peg = custom_growth
+        growth_for_peg = _dampen_growth(custom_growth) if custom_growth > 0 else custom_growth
     else:
         growth_for_peg = _compute_effective_growth(data)
 
-    # Method 1: PEG-Implied Fair Value
-    peg_result = _peg_implied_fair_value(eps, growth_for_peg or growth_5y)
+    # Step 1: PEG-implied fair value (core model)
+    peg_result = _peg_implied_fair_value(eps, growth_for_peg)
 
-    # Method 2: Growth-Adjusted Historical Percentile
-    hist_growth = custom_growth if custom_growth is not None else growth_5y
-    hist_result = _historical_adjusted_fair_value(data, eps, hist_growth)
+    # Step 2: Historical premium/discount multiplier
+    hist_premium = _compute_historical_premium(data)
 
-    # Blend
-    peg_price = peg_result["fair_price"]
-    hist_price = hist_result["fair_price"]
-
-    if peg_price is not None and hist_price is not None:
-        fair_value = peg_price * 0.6 + hist_price * 0.4
-    elif peg_price is not None:
-        fair_value = peg_price
-    elif hist_price is not None:
-        fair_value = hist_price
-    else:
-        fair_value = None
-
-    # Quality adjustment from non-PEG score components
+    # Step 3: Quality adjustment from non-PEG score components
     quality_adjustment = _compute_quality_adjustment(scores)
+
+    # Combine: fair_value = peg_price × premium × quality
+    fair_value = peg_result["fair_price"]
     if fair_value is not None:
-        fair_value = fair_value * quality_adjustment
+        fair_value = fair_value * hist_premium["premium"] * quality_adjustment
 
     # Entry with beta-adjusted margin of safety, Exit with beta-adjusted premium
     margin_of_safety = _calculate_margin(beta)
@@ -75,7 +69,7 @@ def calculate_valuation(
         "exit_premium": exit_premium,
         "quality_adjustment": quality_adjustment,
         "peg_method": peg_result,
-        "historical_method": hist_result,
+        "historical_premium": hist_premium,
     }
 
 
@@ -107,21 +101,24 @@ def _compute_quality_adjustment(scores: dict | None) -> float:
     return 1.0 + (quality_avg - 5.0) * _QUALITY_K
 
 
-def _dampen_growth(growth: float, k: float = 15.0) -> float:
-    """Log-dampen a growth rate to compress high values."""
+def _dampen_growth(growth: float, k: float = _GROWTH_DAMPEN_K) -> float:
+    """Log-dampen a positive growth rate to compress optimistic estimates."""
     if growth <= 0:
         return growth
     return k * math.log(1 + growth / k)
 
 
 def _compute_effective_growth(data: dict) -> float | None:
-    """Compute effective growth for franchise PEG: dampened 5Y estimate."""
+    """Compute effective growth: dampened 5Y estimate (supports negative)."""
     growth_5y = data.get("growth_5y")
 
-    if not growth_5y or growth_5y <= 0:
+    if growth_5y is None:
         return None
 
-    return _dampen_growth(growth_5y)
+    if growth_5y > 0:
+        return _dampen_growth(growth_5y)
+
+    return growth_5y
 
 
 def compute_historical_pe_series(data: dict) -> list[dict]:
@@ -279,56 +276,91 @@ def compute_historical_forward_pe_series(data: dict) -> list[dict]:
 
 
 def _peg_implied_fair_value(eps: float, growth: float) -> dict:
-    """Franchise PEG=1 implies Fair P/E = BASE_PE + Growth.
+    """5-year compounding fair value: Fair P/E = BASE_PE * (1 + g/100)^5.
 
-    The base P/E captures the perpetuity value of current earnings.
-    Growth adds incremental P/E for expected earnings expansion.
+    Pay today's no-growth multiple (12x) for the earnings the company
+    will have in 5 years. Works for negative, zero, and positive growth.
     """
-    if not eps or eps <= 0 or not growth or growth <= 0:
+    if not eps or eps <= 0 or growth is None:
         return {"fair_pe": None, "fair_price": None}
 
-    fair_pe = BASE_PE + growth
-    fair_price = round(fair_pe * eps, 2)
+    fair = _fair_pe(growth)
+    if fair <= 0:
+        return {"fair_pe": None, "fair_price": None}
 
-    return {"fair_pe": round(fair_pe, 2), "fair_price": fair_price}
+    fair_price = round(fair * eps, 2)
+
+    return {"fair_pe": round(fair, 2), "fair_price": fair_price}
 
 
-def _historical_adjusted_fair_value(data: dict, eps: float, current_growth: float) -> dict:
-    """Compute fair value from growth-adjusted historical P/E median.
+def _compute_historical_premium(data: dict) -> dict:
+    """Compute a premium/discount multiplier from historical P/E vs model fair P/E.
 
-    Uses time-appropriate EPS for each historical price point (from annual
-    income statements) rather than dividing all prices by current EPS.
+    Compares how the market actually valued the stock (median trailing P/E over
+    5 years) against what the compounding model says it *should* have traded at
+    given its historical growth rate.
+
+        model_fair_pe = BASE_PE × (1 + hist_growth/100)^5
+        premium       = median_actual_pe / model_fair_pe   (clamped [0.85, 1.15])
+
+    A premium > 1 means the market has historically paid more than the model
+    predicts (brand moat, quality perception, etc.).  A discount < 1 means
+    the market valued it below model expectations.
+
+    Historical growth is NOT dampened — it is backward-looking fact, not an
+    optimistic analyst estimate.
+
+    Returns dict with premium, median_pe, model_pe, and detail fields.
+    Returns premium=1.0 (neutral) when data is insufficient.
     """
     historical_prices = data.get("historical_prices")
     annual_eps = data.get("annual_eps_history")
+    current_eps = data.get("trailing_eps", 0)
     historical_growth = data.get("historical_growth_5y")
 
-    if not historical_prices or not eps or eps <= 0:
-        return {"median_pe": None, "adjusted_pe": None, "fair_price": None, "growth_ratio": None}
+    neutral = {"premium": 1.0, "median_pe": None, "model_pe": None, "historical_growth": None}
 
-    # Compute historical P/E using the EPS that was current at each price point
-    historical_pes = _compute_historical_pes(historical_prices, annual_eps, eps)
-    historical_pes = [pe for pe in historical_pes if 0 < pe < 200]  # Filter outliers
+    if not historical_prices or not current_eps or current_eps <= 0:
+        return neutral
+
+    # Compute historical P/E series using time-appropriate EPS
+    historical_pes = _compute_historical_pes(historical_prices, annual_eps, current_eps)
+    historical_pes = [pe for pe in historical_pes if 0 < pe < 200]
 
     if not historical_pes:
-        return {"median_pe": None, "adjusted_pe": None, "fair_price": None, "growth_ratio": None}
+        return neutral
 
     median_pe = statistics.median(historical_pes)
 
-    # Growth adjustment (CAGR is currency-agnostic so no FX guard needed)
-    if historical_growth and historical_growth > 0 and current_growth and current_growth > 0:
-        growth_ratio = max(min(current_growth / historical_growth, 1.2), 0.8)  # Cap ±20%
-    else:
-        growth_ratio = 1.0  # No adjustment if historical growth unavailable
+    # Need historical growth to compute model fair P/E for comparison
+    if historical_growth is None:
+        return {
+            "premium": 1.0,
+            "median_pe": round(median_pe, 2),
+            "model_pe": None,
+            "historical_growth": None,
+        }
 
-    adjusted_pe = median_pe * growth_ratio
-    fair_price = round(adjusted_pe * eps, 2)
+    # Model fair P/E for historical growth (raw, no dampening)
+    model_pe = _fair_pe(historical_growth)
+
+    if model_pe <= 0:
+        return {
+            "premium": 1.0,
+            "median_pe": round(median_pe, 2),
+            "model_pe": round(model_pe, 2),
+            "historical_growth": round(historical_growth, 2),
+        }
+
+    # Premium: how much more/less the market paid vs model expectation
+    premium = median_pe / model_pe
+    premium = max(0.85, min(1.15, premium))  # Clamp ±15%
 
     return {
+        "premium": round(premium, 2),
         "median_pe": round(median_pe, 2),
-        "adjusted_pe": round(adjusted_pe, 2),
-        "fair_price": fair_price,
-        "growth_ratio": round(growth_ratio, 2),
+        "model_pe": round(model_pe, 2),
+        "historical_growth": round(historical_growth, 2),
     }
 
 

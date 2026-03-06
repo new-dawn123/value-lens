@@ -190,7 +190,7 @@ if "result" in st.session_state:
         )
 
     if scores.get("peg") is not None:
-        st.markdown(f"**PEG Ratio (blended):** {scores['peg']:.2f}")
+        st.markdown(f"**PEG Ratio (ValueLens):** {scores['peg']:.2f}")
 
     st.divider()
 
@@ -338,7 +338,7 @@ if "result" in st.session_state:
         )
 
         peg_m = valuation.get("peg_method", {})
-        hist_m = valuation.get("historical_method", {})
+        hist_p = valuation.get("historical_premium", {})
 
         def _metrics_table(metrics: dict) -> None:
             df = pd.DataFrame(list(metrics.items()), columns=["Metric", "Value"]).set_index("Metric")
@@ -358,29 +358,30 @@ if "result" in st.session_state:
             "0Y EPS Growth": f"{data['growth_current_year']:.1f}%" if data.get("growth_current_year") else "N/A",
             "1Y EPS Growth": f"{data['growth_next_year']:.1f}%" if data.get("growth_next_year") else "N/A",
             "5Y Est. Growth": f"{data['growth_5y']:.1f}%" if data.get("growth_5y") else "N/A",
+            "1Y Revenue Growth": f"{data['revenue_growth_next_year']:.1f}%" if data.get("revenue_growth_next_year") else "N/A",
             "Historical CAGR": f"{data['historical_growth_5y']:.1f}%" if data.get("historical_growth_5y") else "N/A",
             "Eff. Growth (5Y damp.)": f"{scores['blended_growth']:.1f}%" if scores.get("blended_growth") else "N/A",
         })
 
         st.markdown("**Valuation Ratios**")
         _metrics_table({
-            "PEG Ratio (franchise)": f"{scores['peg']:.2f}" if scores.get("peg") else "N/A",
+            "PEG Ratio (ValueLens)": f"{scores['peg']:.2f}" if scores.get("peg") else "N/A",
             "PSG Ratio": f"{scores['psg']:.2f}" if scores.get("psg") else "N/A",
         })
 
         st.markdown("**Valuation Model**")
         _metrics_table({
-            "Fair P/E (franchise)": f"{peg_m['fair_pe']:.2f}" if peg_m.get("fair_pe") else "N/A",
-            "Median P/E (historical)": f"{hist_m['median_pe']:.2f}" if hist_m.get("median_pe") else "N/A",
-            "Growth Ratio": f"{hist_m['growth_ratio']:.2f}x" if hist_m.get("growth_ratio") else "N/A",
-            "Adjusted P/E (historical)": f"{hist_m['adjusted_pe']:.2f}" if hist_m.get("adjusted_pe") else "N/A",
+            "Fair P/E (ValueLens)": f"{peg_m['fair_pe']:.2f}" if peg_m.get("fair_pe") else "N/A",
+            "Median P/E (historical)": f"{hist_p['median_pe']:.2f}" if hist_p.get("median_pe") else "N/A",
+            "Hist. Fair P/E (ValueLens)": f"{hist_p['model_pe']:.2f}" if hist_p.get("model_pe") else "N/A",
+            "Historical Premium": f"{hist_p['premium']:.2f}x" if hist_p.get("premium") else "N/A",
             "Margin of Safety": f"{round(valuation['margin_of_safety'] * 100)}%" if valuation.get("margin_of_safety") is not None else "N/A",
             "Exit Premium": f"{round(valuation['exit_premium'] * 100)}%" if valuation.get("exit_premium") is not None else "N/A",
         })
 
         st.markdown("**Scoring Breakdown**")
         breakdown_labels = {
-            "peg": "PEG Ratio (blended)",
+            "peg": "PEG Ratio (ValueLens)",
             "psg": "PSG Ratio",
             "eps_revisions": "EPS Revisions",
             "earnings_surprises": "Earnings Surprises",
@@ -398,7 +399,7 @@ if "result" in st.session_state:
 
         st.markdown("**Valuation Breakdown**")
         peg_mv = valuation["peg_method"]
-        hist_mv = valuation["historical_method"]
+        hist_pv = valuation["historical_premium"]
         quality_adj = valuation.get("quality_adjustment", 1.0)
         margin_pct = round(valuation.get("margin_of_safety", 0) * 100)
         exit_pct = round(valuation.get("exit_premium", 0) * 100)
@@ -406,40 +407,23 @@ if "result" in st.session_state:
 
         if peg_mv.get("fair_price"):
             val_rows.append({
-                "Method": "PEG-Implied (60%)",
+                "Method": "Fair Price",
                 "Value": f"${peg_mv['fair_price']:,.2f}",
                 "Detail": f"Fair P/E = {peg_mv['fair_pe']}",
             })
-        if hist_mv.get("fair_price"):
-            detail = f"Median P/E = {hist_mv['median_pe']}"
-            if hist_mv.get("growth_ratio") and hist_mv["growth_ratio"] != 1.0:
-                detail += f"<br>Growth adj. = {hist_mv['growth_ratio']}x"
+
+        premium = hist_pv.get("premium", 1.0)
+        if hist_pv.get("median_pe"):
+            detail = f"Median P/E = {hist_pv['median_pe']}"
+            if hist_pv.get("model_pe"):
+                detail += f"<br>Hist. Fair P/E = {hist_pv['model_pe']}"
             val_rows.append({
-                "Method": "Historical Adj. (40%)",
-                "Value": f"${hist_mv['fair_price']:,.2f}",
+                "Method": "Historical Premium",
+                "Value": f"{premium:.2f}x",
                 "Detail": detail,
             })
 
-        # Pre-quality blended value
-        peg_p = peg_mv.get("fair_price")
-        hist_p = hist_mv.get("fair_price")
-        if peg_p and hist_p:
-            blended_raw = peg_p * 0.6 + hist_p * 0.4
-        elif peg_p:
-            blended_raw = peg_p
-        elif hist_p:
-            blended_raw = hist_p
-        else:
-            blended_raw = None
-
-        if blended_raw is not None:
-            val_rows.append({
-                "Method": "Blended",
-                "Value": f"${blended_raw:,.2f}",
-                "Detail": "60/40 weighted average",
-            })
-
-        if quality_adj != 1.0 and blended_raw is not None:
+        if quality_adj != 1.0:
             val_rows.append({
                 "Method": "Quality Adjustment",
                 "Value": f"{quality_adj:.2f}x",

@@ -92,13 +92,13 @@ def _print_detailed(
     _add_metric_row(metrics_table, "0Y EPS Growth", data.get("growth_current_year"), suffix="%", fmt=".1f")
     _add_metric_row(metrics_table, "+1Y EPS Growth", data.get("growth_next_year"), suffix="%", fmt=".1f")
     _add_metric_row(metrics_table, "5Y Est. Growth", data.get("growth_5y"), suffix="%", fmt=".1f")
+    _add_metric_row(metrics_table, "1Y Revenue Growth", data.get("revenue_growth_next_year"), suffix="%", fmt=".1f")
     _add_metric_row(metrics_table, "Eff. Growth (5Y dampened)", scores.get("blended_growth"), suffix="%", fmt=".1f")
     if scores["peg"] is not None:
-        metrics_table.add_row("PEG Ratio (franchise)", f"{scores['peg']:.2f}  ((P/E - 12) / Eff. Growth)")
+        metrics_table.add_row("PEG Ratio (ValueLens)", f"{scores['peg']:.2f}  (P/E / Fair P/E)")
     _add_metric_row(metrics_table, "P/S Ratio", data.get("ps_ratio"), fmt=".2f")
     if scores["psg"] is not None:
-        psg_label = "PSG Ratio" if scores["using_psg"] else "P/S (raw)"
-        metrics_table.add_row(psg_label, f"{scores['psg']:.2f}")
+        metrics_table.add_row("PSG Ratio", f"{scores['psg']:.2f}")
     _add_metric_row(metrics_table, "Beta", data.get("beta"), fmt=".2f")
 
     console.print(metrics_table)
@@ -112,7 +112,7 @@ def _print_detailed(
     scoring_table.add_column("Weight", justify="right", style="dim")
 
     for key, display_label in [
-        ("peg", "PEG Ratio (blended)"),
+        ("peg", "PEG Ratio (ValueLens)"),
         ("psg", "PSG Ratio"),
         ("eps_revisions", "EPS Revisions"),
         ("earnings_surprises", "Earnings Surprises"),
@@ -141,24 +141,25 @@ def _print_detailed(
     val_table.add_column("Value")
 
     peg_m = valuation["peg_method"]
-    hist_m = valuation["historical_method"]
+    hist_p = valuation["historical_premium"]
 
     if peg_m["fair_price"]:
         val_table.add_row(
-            "PEG-Implied Fair Price",
-            f"${peg_m['fair_price']:,.2f}  (60% weight, fair P/E={peg_m['fair_pe']})"
+            "Fair Price",
+            f"${peg_m['fair_price']:,.2f}  (fair P/E={peg_m['fair_pe']})"
         )
-    if hist_m["fair_price"]:
-        details = f"40% weight, median P/E={hist_m['median_pe']}"
-        if hist_m["growth_ratio"] and hist_m["growth_ratio"] != 1.0:
-            details += f", growth adj={hist_m['growth_ratio']}x"
+    if hist_p["median_pe"]:
+        premium_str = f"{hist_p['premium']:.2f}x"
+        details = f"median P/E={hist_p['median_pe']}"
+        if hist_p.get("model_pe"):
+            details += f"\n              Hist. Fair P/E={hist_p['model_pe']}"
         val_table.add_row(
-            "Historical Adj. Fair Price",
-            f"${hist_m['fair_price']:,.2f}  ({details})"
+            "Historical Premium",
+            f"{premium_str}  ({details})"
         )
     if valuation["fair_value"]:
         val_table.add_row(
-            "Blended Fair Value",
+            "Fair Value",
             f"[bold]${valuation['fair_value']:,.2f}[/bold]"
         )
     margin_pct = round(valuation["margin_of_safety"] * 100)

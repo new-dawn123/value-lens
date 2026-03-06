@@ -3,8 +3,22 @@ from __future__ import annotations
 import math
 
 # P/E that a zero-growth company deserves (~perpetuity at 7-8% discount rate).
-# Franchise PEG = (P/E - BASE_PE) / Growth — measures the growth premium only.
 BASE_PE = 12.0
+
+# Dampening factor for 5Y growth estimates. Higher k = less compression.
+# k=80 is light: 10%->9.4%, 20%->17.9%, 30%->25.5%, 50%->38.8%.
+_GROWTH_DAMPEN_K = 80.0
+
+
+def _fair_pe(growth: float) -> float:
+    """Compute fair P/E from growth using the 5-year compounding model.
+
+    Fair P/E = BASE_PE * (1 + g/100)^5
+
+    Meaning: pay today's no-growth multiple for the earnings the company
+    will have in 5 years. Works for negative, zero, and positive growth.
+    """
+    return BASE_PE * (1 + growth / 100) ** 5
 
 
 def score_stock(
@@ -15,30 +29,30 @@ def score_stock(
     """Score a stock on a 0-100 scale using weighted fundamental metrics.
 
     Returns a dict with individual metric scores, weights, and the final score.
-    When custom_growth is provided, it replaces the dampened 5Y growth entirely
-    (used as-is, no dampening).
+    Custom growth is dampened the same way as fetched growth.
     """
     eps = custom_eps if custom_eps is not None else data.get("trailing_eps", 0)
     growth_5y = data.get("growth_5y", 0)
     trailing_pe = data.get("trailing_pe")
 
-    # Growth: use custom override or compute dampened 5Y
+    # Growth: use custom override (dampened) or compute dampened 5Y
     if custom_growth is not None:
-        effective_growth = custom_growth
+        effective_growth = _dampen_growth(custom_growth) if custom_growth > 0 else custom_growth
     else:
         effective_growth = _compute_effective_growth(data)
 
-    # Compute Franchise PEG: (P/E - BASE_PE) / Growth
-    if trailing_pe and effective_growth and effective_growth > 0:
+    # Compute PEG: Actual P/E / Fair P/E
+    if trailing_pe and effective_growth is not None:
         if custom_eps is not None and data.get("current_price"):
             actual_pe = data["current_price"] / custom_eps
         else:
             actual_pe = trailing_pe
-        peg = max(actual_pe - BASE_PE, 0) / effective_growth
+        fp = _fair_pe(effective_growth)
+        peg = actual_pe / fp if fp > 0 else None
     else:
         peg = None
 
-    # Compute PSG: P/S / Revenue Growth (or fallback to raw P/S)
+    # Compute PSG: P/S / Revenue Growth
     ps_ratio = data.get("ps_ratio")
     revenue_growth = data.get("revenue_growth_next_year")
     psg = None
@@ -46,9 +60,6 @@ def score_stock(
     if ps_ratio is not None and revenue_growth is not None and revenue_growth > 0:
         psg = ps_ratio / revenue_growth
         using_psg = True
-    elif ps_ratio is not None:
-        psg = ps_ratio  # fallback: raw P/S
-        using_psg = False
 
     # Score each metric
     peg_score = _score_peg(peg)
@@ -95,13 +106,15 @@ def score_stock(
     }
 
 
-def _dampen_growth(growth: float, k: float = 15.0) -> float:
-    """Log-dampen a growth rate to compress high values.
+def _dampen_growth(growth: float, k: float = _GROWTH_DAMPEN_K) -> float:
+    """Log-dampen a positive growth rate to compress optimistic estimates.
 
     dampen(growth, k) = k * ln(1 + growth / k)
 
-    Examples with k=15:
-        10% -> ~9.1%,  15% -> ~12.8%,  25% -> ~18.3%,  50% -> ~27.6%
+    Examples with k=80:
+        10% -> ~9.4%,  20% -> ~17.9%,  30% -> ~25.5%,  50% -> ~38.8%
+
+    Negative growth is returned as-is (no compression needed for pessimism).
     """
     if growth <= 0:
         return growth
@@ -109,22 +122,26 @@ def _dampen_growth(growth: float, k: float = 15.0) -> float:
 
 
 def _compute_effective_growth(data: dict) -> float | None:
-    """Compute effective growth for franchise PEG: dampened 5Y estimate.
+    """Compute effective growth for PEG: dampened 5Y estimate.
 
-    Uses only the long-term 5Y growth estimate, log-dampened to compress
-    aggressive analyst projections.  Near-term (0Y, +1Y) are intentionally
-    excluded — they add noise without improving the PEG signal, and the
-    franchise PEG with base P/E already accounts for the present value of
-    current earnings.
+    Uses only the long-term 5Y growth estimate, log-dampened (k=80) to
+    lightly compress aggressive analyst projections.  The exponential
+    fair P/E model (BASE_PE * coeff^5) already provides natural compression,
+    so only a light dampening is needed.
 
+    Supports negative growth — the compounding model handles it naturally.
     Returns None if no 5Y growth data is available.
     """
     growth_5y = data.get("growth_5y")
 
-    if not growth_5y or growth_5y <= 0:
+    if growth_5y is None:
         return None
 
-    return _dampen_growth(growth_5y)
+    if growth_5y > 0:
+        return _dampen_growth(growth_5y)
+
+    # Negative growth: pass through undampened
+    return growth_5y
 
 
 def _score_peg(peg: float | None) -> float:
@@ -147,30 +164,17 @@ def _score_peg(peg: float | None) -> float:
 
 
 def _score_psg(psg: float | None, using_psg: bool) -> float:
-    """Score PSG ratio (or raw P/S as fallback) on 0-10 scale."""
-    if psg is None:
+    """Score PSG ratio on 0-10 scale."""
+    if psg is None or not using_psg:
         return 5.0  # neutral if unavailable
 
-    if using_psg:
-        # PSG thresholds (P/S divided by revenue growth)
-        if psg < 0.5:
-            return 10.0
-        if psg < 1.0:
-            return 8.0
-        if psg < 2.0:
-            return 5.0
-        return 2.0
-    else:
-        # Raw P/S fallback thresholds
-        if psg < 1.0:
-            return 10.0
-        if psg < 2.0:
-            return 7.0
-        if psg < 5.0:
-            return 4.0
-        if psg < 10.0:
-            return 2.0
-        return 0.0
+    if psg < 0.5:
+        return 10.0
+    if psg < 1.0:
+        return 8.0
+    if psg < 2.0:
+        return 5.0
+    return 2.0
 
 
 def _score_eps_revisions(revisions: dict | None) -> float:
