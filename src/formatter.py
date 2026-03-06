@@ -65,7 +65,7 @@ def _print_concise(
         exit_pct = round(valuation.get("exit_premium", 0) * 100)
         console.print(
             f"  Exit Price:           [red]>= ${valuation['exit_price']:,.2f}[/red]"
-            f"  ({exit_pct}% above fair value)"
+            f"  ({exit_pct}% above entry)"
         )
     if scores["peg"] is not None:
         console.print(f"  PEG Ratio:            {scores['peg']:.2f}")
@@ -164,8 +164,9 @@ def _print_detailed(
         )
     margin_pct = round(valuation["margin_of_safety"] * 100)
     exit_pct = round(valuation.get("exit_premium", 0) * 100)
-    val_table.add_row("Margin of Safety", f"{margin_pct}% (beta-adjusted)")
-    val_table.add_row("Exit Premium", f"{exit_pct}% (beta-adjusted)")
+    pe_stretch = valuation.get("pe_stretch", 1.0)
+    val_table.add_row("Margin of Safety", f"{margin_pct}% (growth scenario, beta-scaled)")
+    val_table.add_row("Exit Premium", f"{exit_pct}% above entry (P/E stretch={pe_stretch:.2f})")
     if valuation["entry_price"]:
         val_table.add_row("Entry Price", f"[green]<= ${valuation['entry_price']:,.2f}[/green]")
     if valuation["exit_price"]:

@@ -25,6 +25,9 @@ def calculate_valuation(
        — clamped [0.85, 1.15], defaults to 1.0 when data is insufficient.
     3. Quality adjustment: ±15% from PSG/revisions/surprises scores.
 
+    Entry price: beta-scaled growth scenario (pessimistic fair value).
+    Exit price: historical P/E stretch premium above entry.
+
     Custom growth is dampened the same way as fetched growth.
     """
     eps = custom_eps if custom_eps is not None else data.get("trailing_eps", 0)
@@ -36,11 +39,14 @@ def calculate_valuation(
     else:
         growth_for_peg = _compute_effective_growth(data)
 
+    # Historical P/E series (used by both premium and exit calculations)
+    hist_pes = _get_historical_pes(data)
+
     # Step 1: PEG-implied fair value (core model)
     peg_result = _peg_implied_fair_value(eps, growth_for_peg)
 
     # Step 2: Historical premium/discount multiplier
-    hist_premium = _compute_historical_premium(data)
+    hist_premium = _compute_historical_premium(data, hist_pes)
 
     # Step 3: Quality adjustment from non-PEG score components
     quality_adjustment = _compute_quality_adjustment(scores)
@@ -50,15 +56,25 @@ def calculate_valuation(
     if fair_value is not None:
         fair_value = fair_value * hist_premium["premium"] * quality_adjustment
 
-    # Entry with beta-adjusted margin of safety, Exit with beta-adjusted premium
-    margin_of_safety = _calculate_margin(beta)
-    exit_premium = _calculate_exit_premium(beta)
-
+    # Entry: beta-scaled growth scenario
     entry_price = None
+    margin_of_safety = 0.0
+    if fair_value is not None and growth_for_peg is not None:
+        entry_price, margin_of_safety = _calculate_entry(
+            fair_value, growth_for_peg, eps, beta,
+            hist_premium["premium"], quality_adjustment,
+        )
+
+    # Exit: historical P/E stretch above entry
     exit_price = None
+    exit_premium = 0.0
+    pe_stretch = 1.0
+    if entry_price is not None:
+        exit_price, exit_premium, pe_stretch = _calculate_exit(
+            entry_price, hist_pes,
+        )
+
     if fair_value is not None:
-        entry_price = round(fair_value * (1 - margin_of_safety), 2)
-        exit_price = round(fair_value * (1 + exit_premium), 2)
         fair_value = round(fair_value, 2)
 
     return {
@@ -67,6 +83,7 @@ def calculate_valuation(
         "exit_price": exit_price,
         "margin_of_safety": margin_of_safety,
         "exit_premium": exit_premium,
+        "pe_stretch": pe_stretch,
         "quality_adjustment": quality_adjustment,
         "peg_method": peg_result,
         "historical_premium": hist_premium,
@@ -293,7 +310,9 @@ def _peg_implied_fair_value(eps: float, growth: float) -> dict:
     return {"fair_pe": round(fair, 2), "fair_price": fair_price}
 
 
-def _compute_historical_premium(data: dict) -> dict:
+def _compute_historical_premium(
+    data: dict, hist_pes: list[float] | None = None,
+) -> dict:
     """Compute a premium/discount multiplier from historical P/E vs model fair P/E.
 
     Compares how the market actually valued the stock (median trailing P/E over
@@ -310,27 +329,23 @@ def _compute_historical_premium(data: dict) -> dict:
     Historical growth is NOT dampened — it is backward-looking fact, not an
     optimistic analyst estimate.
 
+    Accepts an optional pre-computed hist_pes list to avoid recomputation
+    (the same list is also used by the exit price calculation).
+
     Returns dict with premium, median_pe, model_pe, and detail fields.
     Returns premium=1.0 (neutral) when data is insufficient.
     """
-    historical_prices = data.get("historical_prices")
-    annual_eps = data.get("annual_eps_history")
-    current_eps = data.get("trailing_eps", 0)
     historical_growth = data.get("historical_growth_5y")
 
     neutral = {"premium": 1.0, "median_pe": None, "model_pe": None, "historical_growth": None}
 
-    if not historical_prices or not current_eps or current_eps <= 0:
+    if hist_pes is None:
+        hist_pes = _get_historical_pes(data)
+
+    if not hist_pes:
         return neutral
 
-    # Compute historical P/E series using time-appropriate EPS
-    historical_pes = _compute_historical_pes(historical_prices, annual_eps, current_eps)
-    historical_pes = [pe for pe in historical_pes if 0 < pe < 200]
-
-    if not historical_pes:
-        return neutral
-
-    median_pe = statistics.median(historical_pes)
+    median_pe = statistics.median(hist_pes)
 
     # Need historical growth to compute model fair P/E for comparison
     if historical_growth is None:
@@ -408,13 +423,92 @@ def _compute_historical_pes(
     return pes
 
 
-def _calculate_margin(beta: float) -> float:
-    """Beta-adjusted margin of safety. Base 5%, clamped to [0%, 10%]."""
-    margin = 0.05 + (beta - 1.0) * 0.05
-    return max(0.00, min(0.10, margin))
+def _get_historical_pes(data: dict) -> list[float]:
+    """Get filtered historical P/E values from stock data."""
+    historical_prices = data.get("historical_prices")
+    annual_eps = data.get("annual_eps_history")
+    current_eps = data.get("trailing_eps", 0)
+
+    if not historical_prices or not current_eps or current_eps <= 0:
+        return []
+
+    pes = _compute_historical_pes(historical_prices, annual_eps, current_eps)
+    return [pe for pe in pes if 0 < pe < 200]
 
 
-def _calculate_exit_premium(beta: float) -> float:
-    """Beta-adjusted exit premium. Base 30%, clamped to [20%, 40%]."""
-    premium = 0.30 + (beta - 1.0) * 0.10
-    return max(0.20, min(0.40, premium))
+def _calculate_entry(
+    fair_value: float,
+    growth_for_peg: float,
+    eps: float,
+    beta: float,
+    premium: float,
+    quality: float,
+) -> tuple[float, float]:
+    """Beta-scaled growth scenario entry price.
+
+    Computes a pessimistic fair value by shocking growth downward based
+    on beta.  Higher beta = larger shock = wider entry margin.
+
+        shock = 0.10 × (0.5 + 0.5 × beta), clamped [0.05, 0.25]
+        entry_growth = growth × (1 - shock)   [worse direction for neg growth]
+        entry_price  = fair_pe(entry_growth) × EPS × premium × quality
+        entry discount clamped [3%, 15%]
+
+    Returns (entry_price, entry_discount).
+    """
+    shock = 0.10 * (0.5 + 0.5 * beta)
+    shock = max(0.05, min(0.25, shock))
+
+    if growth_for_peg > 0:
+        g_entry = growth_for_peg * (1 - shock)
+    else:
+        g_entry = growth_for_peg * (1 + shock)
+
+    peg_entry = _peg_implied_fair_value(eps, g_entry)
+
+    if peg_entry["fair_price"]:
+        entry_raw = peg_entry["fair_price"] * premium * quality
+    else:
+        entry_raw = fair_value * 0.95
+
+    entry_discount = (fair_value - entry_raw) / fair_value
+    entry_discount = max(0.03, min(0.15, entry_discount))
+    entry_price = round(fair_value * (1 - entry_discount), 2)
+
+    return entry_price, round(entry_discount, 4)
+
+
+def _calculate_exit(
+    entry_price: float,
+    hist_pes: list[float],
+) -> tuple[float, float, float]:
+    """Historical P/E stretch exit price above entry.
+
+    Uses the ratio of 90th percentile to median historical P/E to determine
+    how much the market historically stretches this stock's valuation.
+
+        pe_stretch   = P/E_90th / P/E_50th
+        exit_premium = 0.25 + (pe_stretch - 1.0) × 0.50, clamped [0.25, 0.50]
+        exit_price   = entry × (1 + exit_premium)
+
+    Fallback: exit_premium = 0.30 when insufficient historical data.
+
+    Returns (exit_price, exit_premium, pe_stretch).
+    """
+    pe_stretch = 1.0
+    exit_premium = 0.30  # fallback
+
+    if hist_pes and len(hist_pes) > 10:
+        p50 = statistics.median(hist_pes)
+        sorted_pes = sorted(hist_pes)
+        idx_90 = int(len(sorted_pes) * 0.90)
+        p90 = sorted_pes[min(idx_90, len(sorted_pes) - 1)]
+        pe_stretch = p90 / p50 if p50 > 0 else 1.0
+
+        exit_premium = 0.25 + (pe_stretch - 1.0) * 0.50
+        exit_premium = max(0.25, min(0.50, exit_premium))
+
+    exit_price = round(entry_price * (1 + exit_premium), 2)
+    pe_stretch = round(pe_stretch, 2)
+
+    return exit_price, round(exit_premium, 4), pe_stretch

@@ -185,7 +185,7 @@ if "result" in st.session_state:
         st.metric(
             "Exit Price",
             f">= ${xp:,.2f}" if xp else "N/A",
-            delta=f"{exit_pct}% premium",
+            delta=f"{exit_pct}% above entry",
             delta_color="off",
         )
 
@@ -375,8 +375,8 @@ if "result" in st.session_state:
             "Median P/E (historical)": f"{hist_p['median_pe']:.2f}" if hist_p.get("median_pe") else "N/A",
             "Hist. Fair P/E (ValueLens)": f"{hist_p['model_pe']:.2f}" if hist_p.get("model_pe") else "N/A",
             "Historical Premium": f"{hist_p['premium']:.2f}x" if hist_p.get("premium") else "N/A",
-            "Margin of Safety": f"{round(valuation['margin_of_safety'] * 100)}%" if valuation.get("margin_of_safety") is not None else "N/A",
-            "Exit Premium": f"{round(valuation['exit_premium'] * 100)}%" if valuation.get("exit_premium") is not None else "N/A",
+            "Margin of Safety": f"{round(valuation['margin_of_safety'] * 100)}% (growth scenario)" if valuation.get("margin_of_safety") is not None else "N/A",
+            "Exit Premium": f"{round(valuation['exit_premium'] * 100)}% above entry (stretch={valuation.get('pe_stretch', 1.0):.2f})" if valuation.get("exit_premium") is not None else "N/A",
         })
 
         st.markdown("**Scoring Breakdown**")
