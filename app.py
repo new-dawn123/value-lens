@@ -354,12 +354,23 @@ if "result" in st.session_state:
         })
 
         st.markdown("**Growth**")
+
+        def _src_label(label: str, source_key: str) -> str:
+            src = data.get(source_key, "")
+            return f"{label} ({src})" if src and src != "N/A" else label
+
+        def _finviz_label(label: str, value_key: str) -> str:
+            return f"{label} (finviz)" if data.get(value_key) is not None else label
+
         _metrics_table({
-            "0Y EPS Growth": f"{data['growth_current_year']:.1f}%" if data.get("growth_current_year") else "N/A",
-            "1Y EPS Growth": f"{data['growth_next_year']:.1f}%" if data.get("growth_next_year") else "N/A",
-            "5Y Est. Growth": f"{data['growth_5y']:.1f}%" if data.get("growth_5y") else "N/A",
+            _src_label("0Y EPS Growth", "growth_current_year_source"): f"{data['growth_current_year']:.1f}%" if data.get("growth_current_year") else "N/A",
+            _src_label("1Y EPS Growth", "growth_next_year_source"): f"{data['growth_next_year']:.1f}%" if data.get("growth_next_year") else "N/A",
+            _src_label("5Y EPS Growth", "growth_5y_source"): f"{data['growth_5y']:.1f}%" if data.get("growth_5y") else "N/A",
             "1Y Revenue Growth": f"{data['revenue_growth_next_year']:.1f}%" if data.get("revenue_growth_next_year") else "N/A",
-            "Historical CAGR": f"{data['historical_growth_5y']:.1f}%" if data.get("historical_growth_5y") else "N/A",
+            _finviz_label("Past 3Y EPS Growth", "historical_growth_3y"): f"{data['historical_growth_3y']:.1f}%" if data.get("historical_growth_3y") else "N/A",
+            _src_label("Past 5Y EPS Growth", "historical_growth_5y_source"): f"{data['historical_growth_5y']:.1f}%" if data.get("historical_growth_5y") else "N/A",
+            _finviz_label("Past 3Y Sales Growth", "sales_growth_3y"): f"{data['sales_growth_3y']:.1f}%" if data.get("sales_growth_3y") else "N/A",
+            _finviz_label("Past 5Y Sales Growth", "sales_growth_5y"): f"{data['sales_growth_5y']:.1f}%" if data.get("sales_growth_5y") else "N/A",
             "Eff. Growth (5Y damp.)": f"{scores['blended_growth']:.1f}%" if scores.get("blended_growth") else "N/A",
         })
 
@@ -375,8 +386,8 @@ if "result" in st.session_state:
             "Median P/E (historical)": f"{hist_p['median_pe']:.2f}" if hist_p.get("median_pe") else "N/A",
             "Hist. Fair P/E (ValueLens)": f"{hist_p['model_pe']:.2f}" if hist_p.get("model_pe") else "N/A",
             "Historical Premium": f"{hist_p['premium']:.2f}x" if hist_p.get("premium") else "N/A",
-            "Margin of Safety": f"{round(valuation['margin_of_safety'] * 100)}% (growth scenario)" if valuation.get("margin_of_safety") is not None else "N/A",
-            "Exit Premium": f"{round(valuation['exit_premium'] * 100)}% above entry (stretch={valuation.get('pe_stretch', 1.0):.2f})" if valuation.get("exit_premium") is not None else "N/A",
+            "Margin of Safety": f"{round(valuation['margin_of_safety'] * 100)}%" if valuation.get("margin_of_safety") is not None else "N/A",
+            "Exit Premium": f"{round(valuation['exit_premium'] * 100)}%" if valuation.get("exit_premium") is not None else "N/A",
         })
 
         st.markdown("**Scoring Breakdown**")

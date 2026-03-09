@@ -12,12 +12,51 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE = 2  # seconds: 2, 4, 8
 
 
+def _fetch_finviz_fundamentals(ticker: str) -> dict | None:
+    """Fetch fundamental snapshot from finviz. Returns dict or None on failure."""
+    try:
+        from finvizfinance.quote import finvizfinance
+        stock = finvizfinance(ticker)
+        return stock.ticker_fundament()
+    except Exception:
+        return None
+
+
+def _parse_finviz_pct(value: str) -> float | None:
+    """Parse a finviz percentage string like '10.20%' or '-3.50%' to a float."""
+    if not value or value == "-":
+        return None
+    try:
+        return float(value.replace("%", ""))
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_finviz_dual_pct(value: str, index: int = 1) -> float | None:
+    """Parse a finviz dual-value field like '6.89% 17.91%'.
+
+    index=0 → first value (3Y), index=1 → second value (5Y).
+    """
+    if not value or value == "-":
+        return None
+    try:
+        parts = value.split()
+        if len(parts) > index:
+            return float(parts[index].replace("%", ""))
+    except (ValueError, TypeError, IndexError):
+        pass
+    return None
+
+
 def fetch_stock_data(ticker: str) -> dict:
-    """Fetch all fundamental data needed for analysis from yfinance."""
+    """Fetch all fundamental data needed for analysis from yfinance + finviz."""
     stock, info = _fetch_info_with_retry(ticker)
 
     if not info or info.get("quoteType") is None:
         raise ValueError(f"Ticker '{ticker}' not found or no data available")
+
+    # Fetch finviz fundamentals (single call, used for growth fields)
+    finviz = _fetch_finviz_fundamentals(ticker)
 
     data = {
         "name": info.get("shortName") or info.get("longName") or ticker,
@@ -33,13 +72,17 @@ def fetch_stock_data(ticker: str) -> dict:
         "market_cap": info.get("marketCap"),
     }
 
-    # 5-year estimated EPS growth
-    data["growth_5y"] = _get_growth_estimate(stock)
+    # 5-year estimated EPS growth (finviz primary, yfinance fallback)
+    growth_5y, growth_5y_source = _get_growth_estimate(stock, finviz)
+    data["growth_5y"] = growth_5y
+    data["growth_5y_source"] = growth_5y_source
 
-    # Short-term EPS growth (0y and +1y) for blended PEG
-    short_term = _get_short_term_growth(stock)
+    # Short-term EPS growth (0y and +1y) — finviz primary, yfinance fallback
+    short_term = _get_short_term_growth(stock, finviz)
     data["growth_current_year"] = short_term["growth_current_year"]
+    data["growth_current_year_source"] = short_term["growth_current_year_source"]
     data["growth_next_year"] = short_term["growth_next_year"]
+    data["growth_next_year_source"] = short_term["growth_next_year_source"]
 
     # Next-year revenue growth
     data["revenue_growth_next_year"] = _get_revenue_growth(stock)
@@ -50,8 +93,23 @@ def fetch_stock_data(ticker: str) -> dict:
     # Earnings history (last 4 quarters)
     data["earnings_history"] = _get_earnings_history(stock)
 
-    # Historical 5Y growth (past)
-    data["historical_growth_5y"] = _get_historical_growth(stock)
+    # Historical 5Y growth (past) — finviz primary, yfinance fallback
+    hist_growth, hist_growth_source = _get_historical_growth(stock, finviz)
+    data["historical_growth_5y"] = hist_growth
+    data["historical_growth_5y_source"] = hist_growth_source
+
+    # Historical 3Y EPS growth (finviz only)
+    data["historical_growth_3y"] = _parse_finviz_dual_pct(
+        finviz.get("EPS past 3/5Y"), index=0,
+    ) if finviz else None
+
+    # Sales growth past 3Y and 5Y (finviz only)
+    data["sales_growth_3y"] = _parse_finviz_dual_pct(
+        finviz.get("Sales past 3/5Y"), index=0,
+    ) if finviz else None
+    data["sales_growth_5y"] = _parse_finviz_dual_pct(
+        finviz.get("Sales past 3/5Y"), index=1,
+    ) if finviz else None
 
     # 5-year historical prices for historical P/E computation
     data["historical_prices"] = _get_historical_prices(stock)
@@ -105,30 +163,40 @@ def _fetch_info_with_retry(ticker: str) -> tuple[yf.Ticker, dict]:
     return stock, info
 
 
-def _get_growth_estimate(stock: yf.Ticker) -> float | None:
+def _get_growth_estimate(
+    stock: yf.Ticker, finviz: dict | None = None,
+) -> tuple[float | None, str]:
     """Extract estimated EPS growth rate with fallback chain.
 
     Priority:
-    1. Long-term growth (LTG) from growth_estimates (5Y estimate)
-    2. Average of current-year and next-year growth from earnings_estimate
-    3. earningsGrowth from ticker info
+    1. Finviz 'EPS next 5Y'
+    2. Long-term growth (LTG) from yfinance growth_estimates (5Y estimate)
+    3. Average of current-year and next-year growth from yfinance earnings_estimate
+    4. earningsGrowth from yfinance ticker info
+
+    Returns (value, source_label).
     """
-    # Try 1: LTG from growth_estimates
+    # Try 1: Finviz 'EPS next 5Y'
+    if finviz:
+        val = _parse_finviz_pct(finviz.get("EPS next 5Y"))
+        if val is not None:
+            return val, "finviz"
+
+    # Try 2: LTG from growth_estimates
     try:
         ge = stock.growth_estimates
         if ge is not None and not ge.empty:
-            # Check for LTG (long-term growth) or +5y row
             for row_label in ["LTG", "+5y"]:
                 if row_label in ge.index:
                     for col in ["stockTrend", "stock"]:
                         if col in ge.columns:
                             val = ge.loc[row_label, col]
                             if val is not None and pd.notna(val):
-                                return float(val) * 100
+                                return float(val) * 100, "yfinance"
     except Exception:
         pass
 
-    # Try 2: Average of 0y and +1y growth from earnings_estimate
+    # Try 3: Average of 0y and +1y growth from earnings_estimate
     try:
         ee = stock.earnings_estimate
         if ee is not None and not ee.empty and "growth" in ee.columns:
@@ -139,39 +207,60 @@ def _get_growth_estimate(stock: yf.Ticker) -> float | None:
                     if val is not None and pd.notna(val):
                         growth_values.append(float(val))
             if growth_values:
-                return (sum(growth_values) / len(growth_values)) * 100
+                return (sum(growth_values) / len(growth_values)) * 100, "yfinance"
     except Exception:
         pass
 
-    # Try 3: earningsGrowth from info
+    # Try 4: earningsGrowth from info
     try:
         info = stock.info
         eg = info.get("earningsGrowth")
         if eg is not None:
-            return float(eg) * 100
+            return float(eg) * 100, "yfinance"
     except Exception:
         pass
 
-    return None
+    return None, "N/A"
 
 
-def _get_short_term_growth(stock: yf.Ticker) -> dict:
-    """Extract current-year (0y) and next-year (+1y) EPS growth from earnings_estimate.
+def _get_short_term_growth(
+    stock: yf.Ticker, finviz: dict | None = None,
+) -> dict:
+    """Extract current-year (0y) and next-year (+1y) EPS growth.
 
-    These are used for the blended dampened PEG calculation.
-    Returns a dict with growth_current_year and growth_next_year (both as percentages or None).
+    Finviz primary, yfinance fallback.  Used for blended dampened PEG.
+    Returns dict with growth values and their sources.
     """
-    result = {"growth_current_year": None, "growth_next_year": None}
+    result = {
+        "growth_current_year": None, "growth_current_year_source": "N/A",
+        "growth_next_year": None, "growth_next_year_source": "N/A",
+    }
+
+    # Try finviz first
+    if finviz:
+        val = _parse_finviz_pct(finviz.get("EPS this Y"))
+        if val is not None:
+            result["growth_current_year"] = val
+            result["growth_current_year_source"] = "finviz"
+        # EPS next Y: finviz has both an absolute and a percentage field
+        val = _parse_finviz_pct(finviz.get("EPS next Y Percentage"))
+        if val is not None:
+            result["growth_next_year"] = val
+            result["growth_next_year_source"] = "finviz"
+
+    # Fallback to yfinance for any still-missing fields
     try:
         ee = stock.earnings_estimate
         if ee is not None and not ee.empty and "growth" in ee.columns:
             for period, key in [("0y", "growth_current_year"), ("+1y", "growth_next_year")]:
-                if period in ee.index:
+                if result[key] is None and period in ee.index:
                     val = ee.loc[period, "growth"]
                     if val is not None and pd.notna(val):
                         result[key] = float(val) * 100
+                        result[f"{key}_source"] = "yfinance"
     except Exception:
         pass
+
     return result
 
 
@@ -227,17 +316,25 @@ def _get_earnings_history(stock: yf.Ticker) -> list[dict] | None:
     return None
 
 
-def _get_historical_growth(stock: yf.Ticker) -> float | None:
+def _get_historical_growth(
+    stock: yf.Ticker, finviz: dict | None = None,
+) -> tuple[float | None, str]:
     """Extract historical EPS growth rate.
 
     Priority:
-    1. -5y row from growth_estimates (if Yahoo still provides it)
-    2. Log-linear regression on annual Diluted EPS from income statement.
-       Fits ln(EPS) = intercept + slope * t, where slope = ln(1+g).
-       Uses all positive EPS data points (typically 3-4 years) and is more
-       robust than 2-point CAGR to outlier start/end years.
+    1. Finviz 'EPS past 5Y'
+    2. -5y row from yfinance growth_estimates
+    3. Log-linear regression on annual Diluted EPS from yfinance income statement.
+
+    Returns (value, source_label).
     """
-    # Try 1: -5y from growth_estimates
+    # Try 1: Finviz 'EPS past 3/5Y' — second value is the 5Y growth
+    if finviz:
+        val = _parse_finviz_dual_pct(finviz.get("EPS past 3/5Y"), index=1)
+        if val is not None:
+            return val, "finviz"
+
+    # Try 2: -5y from growth_estimates
     try:
         ge = stock.growth_estimates
         if ge is not None and not ge.empty and "-5y" in ge.index:
@@ -245,18 +342,17 @@ def _get_historical_growth(stock: yf.Ticker) -> float | None:
                 if col in ge.columns:
                     val = ge.loc["-5y", col]
                     if val is not None and pd.notna(val):
-                        return float(val) * 100
+                        return float(val) * 100, "yfinance"
     except Exception:
         pass
 
-    # Try 2: Log-linear regression on annual Diluted EPS
+    # Try 3: Log-linear regression on annual Diluted EPS
     try:
         import numpy as np
 
         inc = stock.income_stmt
         if inc is not None and not inc.empty and "Diluted EPS" in inc.index:
             eps_row = inc.loc["Diluted EPS"]
-            # Collect valid positive EPS with dates, sorted oldest first
             points = []
             for date, val in eps_row.items():
                 if val is not None and pd.notna(val) and float(val) > 0:
@@ -272,11 +368,11 @@ def _get_historical_growth(stock: yf.Ticker) -> float | None:
                     log_eps = np.log(np.array([e for _, e in points]))
                     slope, _ = np.polyfit(years, log_eps, 1)
                     cagr = (np.exp(slope) - 1) * 100
-                    return round(float(cagr), 2)
+                    return round(float(cagr), 2), "yfinance (CAGR)"
     except Exception:
         pass
 
-    return None
+    return None, "N/A"
 
 
 def _get_historical_prices(stock: yf.Ticker) -> list[dict] | None:

@@ -89,10 +89,14 @@ def _print_detailed(
     _add_metric_row(metrics_table, "Trailing P/E", data.get("trailing_pe"), fmt=".2f")
     _add_metric_row(metrics_table, "Forward P/E", data.get("forward_pe"), fmt=".2f")
     _add_metric_row(metrics_table, "Trailing EPS", data.get("trailing_eps"), prefix="$", fmt=".2f")
-    _add_metric_row(metrics_table, "0Y EPS Growth", data.get("growth_current_year"), suffix="%", fmt=".1f")
-    _add_metric_row(metrics_table, "+1Y EPS Growth", data.get("growth_next_year"), suffix="%", fmt=".1f")
-    _add_metric_row(metrics_table, "5Y Est. Growth", data.get("growth_5y"), suffix="%", fmt=".1f")
+    _add_metric_row_sourced(metrics_table, "0Y EPS Growth", data.get("growth_current_year"), data.get("growth_current_year_source"), suffix="%", fmt=".1f")
+    _add_metric_row_sourced(metrics_table, "1Y EPS Growth", data.get("growth_next_year"), data.get("growth_next_year_source"), suffix="%", fmt=".1f")
+    _add_metric_row_sourced(metrics_table, "5Y EPS Growth", data.get("growth_5y"), data.get("growth_5y_source"), suffix="%", fmt=".1f")
     _add_metric_row(metrics_table, "1Y Revenue Growth", data.get("revenue_growth_next_year"), suffix="%", fmt=".1f")
+    _add_metric_row_sourced(metrics_table, "Past 3Y EPS Growth", data.get("historical_growth_3y"), "finviz" if data.get("historical_growth_3y") is not None else None, suffix="%", fmt=".1f")
+    _add_metric_row_sourced(metrics_table, "Past 5Y EPS Growth", data.get("historical_growth_5y"), data.get("historical_growth_5y_source"), suffix="%", fmt=".1f")
+    _add_metric_row_sourced(metrics_table, "Past 3Y Sales Growth", data.get("sales_growth_3y"), "finviz" if data.get("sales_growth_3y") is not None else None, suffix="%", fmt=".1f")
+    _add_metric_row_sourced(metrics_table, "Past 5Y Sales Growth", data.get("sales_growth_5y"), "finviz" if data.get("sales_growth_5y") is not None else None, suffix="%", fmt=".1f")
     _add_metric_row(metrics_table, "Eff. Growth (5Y dampened)", scores.get("blended_growth"), suffix="%", fmt=".1f")
     if scores["peg"] is not None:
         metrics_table.add_row("PEG Ratio (ValueLens)", f"{scores['peg']:.2f}  (P/E / Fair P/E)")
@@ -165,8 +169,8 @@ def _print_detailed(
     margin_pct = round(valuation["margin_of_safety"] * 100)
     exit_pct = round(valuation.get("exit_premium", 0) * 100)
     pe_stretch = valuation.get("pe_stretch", 1.0)
-    val_table.add_row("Margin of Safety", f"{margin_pct}% (growth scenario, beta-scaled)")
-    val_table.add_row("Exit Premium", f"{exit_pct}% above entry (P/E stretch={pe_stretch:.2f})")
+    val_table.add_row("Margin of Safety", f"{margin_pct}%")
+    val_table.add_row("Exit Premium", f"{exit_pct}%")
     if valuation["entry_price"]:
         val_table.add_row("Entry Price", f"[green]<= ${valuation['entry_price']:,.2f}[/green]")
     if valuation["exit_price"]:
@@ -209,3 +213,12 @@ def _add_metric_row(table: Table, label: str, value, prefix: str = "", suffix: s
     else:
         formatted = f"{prefix}{value:{fmt}}{suffix}" if fmt else f"{prefix}{value}{suffix}"
         table.add_row(label, formatted)
+
+
+def _add_metric_row_sourced(table: Table, label: str, value, source: str | None, prefix: str = "", suffix: str = "", fmt: str = ""):
+    if value is None:
+        table.add_row(label, "N/A")
+    else:
+        formatted = f"{prefix}{value:{fmt}}{suffix}" if fmt else f"{prefix}{value}{suffix}"
+        display_label = f"{label} ({source})" if source and source != "N/A" else label
+        table.add_row(display_label, formatted)
