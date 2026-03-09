@@ -368,7 +368,7 @@ def _get_historical_growth(
                     log_eps = np.log(np.array([e for _, e in points]))
                     slope, _ = np.polyfit(years, log_eps, 1)
                     cagr = (np.exp(slope) - 1) * 100
-                    return round(float(cagr), 2), "yfinance (CAGR)"
+                    return round(float(cagr), 2), "yfinance"
     except Exception:
         pass
 

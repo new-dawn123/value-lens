@@ -54,7 +54,10 @@ with st.form("analyze_form"):
         analyze = st.form_submit_button("Analyze", type="primary", width="stretch")
 
 with st.expander("Advanced Options"):
-    use_custom_eps = st.checkbox("Override trailing EPS")
+    use_custom_eps = st.checkbox(
+        "Override trailing EPS",
+        help="Override trailing EPS for stocks with GAAP distortions.",
+    )
     custom_eps = None
     if use_custom_eps:
         custom_eps = st.number_input(
@@ -64,9 +67,11 @@ with st.expander("Advanced Options"):
             step=0.01,
             format="%.2f",
             placeholder="e.g. 5.67",
-            help="Override trailing EPS for stocks with GAAP distortions",
         )
-    use_custom_growth = st.checkbox("Override 5Y growth rate")
+    use_custom_growth = st.checkbox(
+        "Override 5Y growth rate",
+        help="Bypasses dampened 5Y growth calculation.",
+    )
     custom_growth = None
     if use_custom_growth:
         custom_growth = st.number_input(
@@ -76,8 +81,15 @@ with st.expander("Advanced Options"):
             step=0.5,
             format="%.1f",
             placeholder="e.g. 15.0",
-            help="Override 5Y growth rate. Bypasses dampened 5Y growth calculation.",
         )
+    disregard_hist_premium = st.checkbox(
+        "Disregard Historical Premium",
+        help="Still calculated and shown, but not applied to Fair Value.",
+    )
+    disregard_quality_adj = st.checkbox(
+        "Disregard Quality Adjustment",
+        help="Still calculated and shown, but not applied to Fair Value.",
+    )
 
 
 # --- Orchestration ---
@@ -101,7 +113,9 @@ if analyze and ticker:
 
     scores = score_stock(data, custom_eps=custom_eps, custom_growth=custom_growth)
     valuation = calculate_valuation(
-        data, custom_eps=custom_eps, custom_growth=custom_growth, scores=scores
+        data, custom_eps=custom_eps, custom_growth=custom_growth, scores=scores,
+        disregard_hist_premium=disregard_hist_premium,
+        disregard_quality_adj=disregard_quality_adj,
     )
     scores = apply_price_cap(scores, data, valuation)
     pe_series = compute_historical_pe_series(data)
@@ -115,6 +129,8 @@ if analyze and ticker:
         "pe_series": pe_series,
         "fwd_pe_series": fwd_pe_series,
         "gate_messages": gate_messages,
+        "disregard_hist_premium": disregard_hist_premium,
+        "disregard_quality_adj": disregard_quality_adj,
     }
 
 
@@ -127,6 +143,8 @@ if "result" in st.session_state:
     valuation = r["valuation"]
     pe_series = r["pe_series"]
     fwd_pe_series = r["fwd_pe_series"]
+    disregard_hist_premium = r.get("disregard_hist_premium", False)
+    disregard_quality_adj = r.get("disregard_quality_adj", False)
 
     # --- Section 2: Score & Summary ---
     name = data.get("name", ticker)
@@ -353,24 +371,28 @@ if "result" in st.session_state:
             "Beta": f"{data['beta']:.2f}" if data.get("beta") else "N/A",
         })
 
-        st.markdown("**Growth**")
-
-        def _src_label(label: str, source_key: str) -> str:
-            src = data.get(source_key, "")
-            return f"{label} ({src})" if src and src != "N/A" else label
-
-        def _finviz_label(label: str, value_key: str) -> str:
-            return f"{label} (finviz)" if data.get(value_key) is not None else label
+        growth_sources = sorted({
+            src for key in (
+                "growth_current_year_source", "growth_next_year_source",
+                "growth_5y_source", "historical_growth_5y_source",
+            )
+            if (src := data.get(key)) and src != "N/A"
+        } | ({"finviz"} if any(
+            data.get(k) is not None
+            for k in ("historical_growth_3y", "sales_growth_3y", "sales_growth_5y")
+        ) else set()))
+        growth_src_suffix = f" ({', '.join(growth_sources)})" if growth_sources else ""
+        st.markdown(f"**Growth{growth_src_suffix}**")
 
         _metrics_table({
-            _src_label("0Y EPS Growth", "growth_current_year_source"): f"{data['growth_current_year']:.1f}%" if data.get("growth_current_year") else "N/A",
-            _src_label("1Y EPS Growth", "growth_next_year_source"): f"{data['growth_next_year']:.1f}%" if data.get("growth_next_year") else "N/A",
-            _src_label("5Y EPS Growth", "growth_5y_source"): f"{data['growth_5y']:.1f}%" if data.get("growth_5y") else "N/A",
+            "0Y EPS Growth": f"{data['growth_current_year']:.1f}%" if data.get("growth_current_year") else "N/A",
+            "1Y EPS Growth": f"{data['growth_next_year']:.1f}%" if data.get("growth_next_year") else "N/A",
+            "5Y EPS Growth": f"{data['growth_5y']:.1f}%" if data.get("growth_5y") else "N/A",
             "1Y Revenue Growth": f"{data['revenue_growth_next_year']:.1f}%" if data.get("revenue_growth_next_year") else "N/A",
-            _finviz_label("Past 3Y EPS Growth", "historical_growth_3y"): f"{data['historical_growth_3y']:.1f}%" if data.get("historical_growth_3y") else "N/A",
-            _src_label("Past 5Y EPS Growth", "historical_growth_5y_source"): f"{data['historical_growth_5y']:.1f}%" if data.get("historical_growth_5y") else "N/A",
-            _finviz_label("Past 3Y Sales Growth", "sales_growth_3y"): f"{data['sales_growth_3y']:.1f}%" if data.get("sales_growth_3y") else "N/A",
-            _finviz_label("Past 5Y Sales Growth", "sales_growth_5y"): f"{data['sales_growth_5y']:.1f}%" if data.get("sales_growth_5y") else "N/A",
+            "Past 3Y EPS Growth": f"{data['historical_growth_3y']:.1f}%" if data.get("historical_growth_3y") else "N/A",
+            "Past 5Y EPS Growth": f"{data['historical_growth_5y']:.1f}%" if data.get("historical_growth_5y") else "N/A",
+            "Past 3Y Sales Growth": f"{data['sales_growth_3y']:.1f}%" if data.get("sales_growth_3y") else "N/A",
+            "Past 5Y Sales Growth": f"{data['sales_growth_5y']:.1f}%" if data.get("sales_growth_5y") else "N/A",
             "Eff. Growth (5Y damp.)": f"{scores['blended_growth']:.1f}%" if scores.get("blended_growth") else "N/A",
         })
 
@@ -385,7 +407,7 @@ if "result" in st.session_state:
             "Fair P/E (ValueLens)": f"{peg_m['fair_pe']:.2f}" if peg_m.get("fair_pe") else "N/A",
             "Median P/E (historical)": f"{hist_p['median_pe']:.2f}" if hist_p.get("median_pe") else "N/A",
             "Hist. Fair P/E (ValueLens)": f"{hist_p['model_pe']:.2f}" if hist_p.get("model_pe") else "N/A",
-            "Historical Premium": f"{hist_p['premium']:.2f}x" if hist_p.get("premium") else "N/A",
+            "Historical Premium" + (" (disregarded)" if disregard_hist_premium else ""): f"{hist_p['premium']:.2f}x" if hist_p.get("premium") else "N/A",
             "Margin of Safety": f"{round(valuation['margin_of_safety'] * 100)}%" if valuation.get("margin_of_safety") is not None else "N/A",
             "Exit Premium": f"{round(valuation['exit_premium'] * 100)}%" if valuation.get("exit_premium") is not None else "N/A",
         })
@@ -428,15 +450,21 @@ if "result" in st.session_state:
             detail = f"Median P/E = {hist_pv['median_pe']}"
             if hist_pv.get("model_pe"):
                 detail += f"<br>Hist. Fair P/E = {hist_pv['model_pe']}"
+            hp_label = "Historical Premium"
+            if disregard_hist_premium:
+                hp_label += " <i>(disregarded)</i>"
             val_rows.append({
-                "Method": "Historical Premium",
+                "Method": hp_label,
                 "Value": f"{premium:.2f}x",
                 "Detail": detail,
             })
 
         if quality_adj != 1.0:
+            qa_label = "Quality Adjustment"
+            if disregard_quality_adj:
+                qa_label += " <i>(disregarded)</i>"
             val_rows.append({
-                "Method": "Quality Adjustment",
+                "Method": qa_label,
                 "Value": f"{quality_adj:.2f}x",
                 "Detail": "PSG, revisions, surprises",
             })

@@ -13,6 +13,8 @@ def calculate_valuation(
     custom_eps: float | None = None,
     custom_growth: float | None = None,
     scores: dict | None = None,
+    disregard_hist_premium: bool = False,
+    disregard_quality_adj: bool = False,
 ) -> dict:
     """Calculate fair value, entry price, and exit price.
 
@@ -51,10 +53,14 @@ def calculate_valuation(
     # Step 3: Quality adjustment from non-PEG score components
     quality_adjustment = _compute_quality_adjustment(scores)
 
+    # Effective multipliers (1.0 when disregarded)
+    eff_premium = 1.0 if disregard_hist_premium else hist_premium["premium"]
+    eff_quality = 1.0 if disregard_quality_adj else quality_adjustment
+
     # Combine: fair_value = peg_price × premium × quality
     fair_value = peg_result["fair_price"]
     if fair_value is not None:
-        fair_value = fair_value * hist_premium["premium"] * quality_adjustment
+        fair_value = fair_value * eff_premium * eff_quality
 
     # Entry: beta-scaled growth scenario
     entry_price = None
@@ -62,7 +68,7 @@ def calculate_valuation(
     if fair_value is not None and growth_for_peg is not None:
         entry_price, margin_of_safety = _calculate_entry(
             fair_value, growth_for_peg, eps, beta,
-            hist_premium["premium"], quality_adjustment,
+            eff_premium, eff_quality,
         )
 
     # Exit: historical P/E stretch above entry

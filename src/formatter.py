@@ -9,6 +9,8 @@ def print_output(
     gate_messages: list[str],
     scores: dict,
     valuation: dict,
+    disregard_hist_premium: bool = False,
+    disregard_quality_adj: bool = False,
 ):
     """Print analysis results to terminal using rich."""
     console = Console(width=65)
@@ -26,7 +28,8 @@ def print_output(
     console.print(header)
     console.print("-" * 58, style="dim")
 
-    _print_detailed(console, data, scores, valuation, gate_messages)
+    _print_detailed(console, data, scores, valuation, gate_messages,
+                    disregard_hist_premium, disregard_quality_adj)
 
     console.print()
 
@@ -79,6 +82,8 @@ def _print_detailed(
     scores: dict,
     valuation: dict,
     warnings: list[str],
+    disregard_hist_premium: bool = False,
+    disregard_quality_adj: bool = False,
 ):
     # Metrics table
     console.print("\n[bold]METRICS[/bold]")
@@ -89,23 +94,43 @@ def _print_detailed(
     _add_metric_row(metrics_table, "Trailing P/E", data.get("trailing_pe"), fmt=".2f")
     _add_metric_row(metrics_table, "Forward P/E", data.get("forward_pe"), fmt=".2f")
     _add_metric_row(metrics_table, "Trailing EPS", data.get("trailing_eps"), prefix="$", fmt=".2f")
-    _add_metric_row_sourced(metrics_table, "0Y EPS Growth", data.get("growth_current_year"), data.get("growth_current_year_source"), suffix="%", fmt=".1f")
-    _add_metric_row_sourced(metrics_table, "1Y EPS Growth", data.get("growth_next_year"), data.get("growth_next_year_source"), suffix="%", fmt=".1f")
-    _add_metric_row_sourced(metrics_table, "5Y EPS Growth", data.get("growth_5y"), data.get("growth_5y_source"), suffix="%", fmt=".1f")
-    _add_metric_row(metrics_table, "1Y Revenue Growth", data.get("revenue_growth_next_year"), suffix="%", fmt=".1f")
-    _add_metric_row_sourced(metrics_table, "Past 3Y EPS Growth", data.get("historical_growth_3y"), "finviz" if data.get("historical_growth_3y") is not None else None, suffix="%", fmt=".1f")
-    _add_metric_row_sourced(metrics_table, "Past 5Y EPS Growth", data.get("historical_growth_5y"), data.get("historical_growth_5y_source"), suffix="%", fmt=".1f")
-    _add_metric_row_sourced(metrics_table, "Past 3Y Sales Growth", data.get("sales_growth_3y"), "finviz" if data.get("sales_growth_3y") is not None else None, suffix="%", fmt=".1f")
-    _add_metric_row_sourced(metrics_table, "Past 5Y Sales Growth", data.get("sales_growth_5y"), "finviz" if data.get("sales_growth_5y") is not None else None, suffix="%", fmt=".1f")
-    _add_metric_row(metrics_table, "Eff. Growth (5Y dampened)", scores.get("blended_growth"), suffix="%", fmt=".1f")
-    if scores["peg"] is not None:
-        metrics_table.add_row("PEG Ratio (ValueLens)", f"{scores['peg']:.2f}  (P/E / Fair P/E)")
-    _add_metric_row(metrics_table, "P/S Ratio", data.get("ps_ratio"), fmt=".2f")
-    if scores["psg"] is not None:
-        metrics_table.add_row("PSG Ratio", f"{scores['psg']:.2f}")
-    _add_metric_row(metrics_table, "Beta", data.get("beta"), fmt=".2f")
 
+    growth_sources = sorted({
+        src for key in (
+            "growth_current_year_source", "growth_next_year_source",
+            "growth_5y_source", "historical_growth_5y_source",
+        )
+        if (src := data.get(key)) and src != "N/A"
+    } | ({"finviz"} if any(
+        data.get(k) is not None
+        for k in ("historical_growth_3y", "sales_growth_3y", "sales_growth_5y")
+    ) else set()))
+    growth_header = "GROWTH"
+    if growth_sources:
+        growth_header += f" ({', '.join(growth_sources)})"
     console.print(metrics_table)
+    console.print(f"\n[bold]{growth_header}[/bold]")
+    growth_table = Table(show_header=False, box=None, padding=(0, 2))
+    growth_table.add_column("Metric", style="dim")
+    growth_table.add_column("Value")
+
+    _add_metric_row(growth_table, "0Y EPS Growth", data.get("growth_current_year"), suffix="%", fmt=".1f")
+    _add_metric_row(growth_table, "1Y EPS Growth", data.get("growth_next_year"), suffix="%", fmt=".1f")
+    _add_metric_row(growth_table, "5Y EPS Growth", data.get("growth_5y"), suffix="%", fmt=".1f")
+    _add_metric_row(growth_table, "1Y Revenue Growth", data.get("revenue_growth_next_year"), suffix="%", fmt=".1f")
+    _add_metric_row(growth_table, "Past 3Y EPS Growth", data.get("historical_growth_3y"), suffix="%", fmt=".1f")
+    _add_metric_row(growth_table, "Past 5Y EPS Growth", data.get("historical_growth_5y"), suffix="%", fmt=".1f")
+    _add_metric_row(growth_table, "Past 3Y Sales Growth", data.get("sales_growth_3y"), suffix="%", fmt=".1f")
+    _add_metric_row(growth_table, "Past 5Y Sales Growth", data.get("sales_growth_5y"), suffix="%", fmt=".1f")
+    _add_metric_row(growth_table, "Eff. Growth (5Y dampened)", scores.get("blended_growth"), suffix="%", fmt=".1f")
+    if scores["peg"] is not None:
+        growth_table.add_row("PEG Ratio (ValueLens)", f"{scores['peg']:.2f}  (P/E / Fair P/E)")
+    _add_metric_row(growth_table, "P/S Ratio", data.get("ps_ratio"), fmt=".2f")
+    if scores["psg"] is not None:
+        growth_table.add_row("PSG Ratio", f"{scores['psg']:.2f}")
+    _add_metric_row(growth_table, "Beta", data.get("beta"), fmt=".2f")
+
+    console.print(growth_table)
 
     # Scoring breakdown
     console.print("\n[bold]SCORING BREAKDOWN[/bold]")
@@ -157,10 +182,19 @@ def _print_detailed(
         details = f"median P/E={hist_p['median_pe']}"
         if hist_p.get("model_pe"):
             details += f"\n              Hist. Fair P/E={hist_p['model_pe']}"
+        hp_label = "Historical Premium"
+        if disregard_hist_premium:
+            hp_label += " [dim](disregarded)[/dim]"
         val_table.add_row(
-            "Historical Premium",
+            hp_label,
             f"{premium_str}  ({details})"
         )
+    quality_adj = valuation.get("quality_adjustment", 1.0)
+    if quality_adj != 1.0:
+        qa_label = "Quality Adjustment"
+        if disregard_quality_adj:
+            qa_label += " [dim](disregarded)[/dim]"
+        val_table.add_row(qa_label, f"{quality_adj:.2f}x  (PSG, revisions, surprises)")
     if valuation["fair_value"]:
         val_table.add_row(
             "Fair Value",
@@ -213,12 +247,3 @@ def _add_metric_row(table: Table, label: str, value, prefix: str = "", suffix: s
     else:
         formatted = f"{prefix}{value:{fmt}}{suffix}" if fmt else f"{prefix}{value}{suffix}"
         table.add_row(label, formatted)
-
-
-def _add_metric_row_sourced(table: Table, label: str, value, source: str | None, prefix: str = "", suffix: str = "", fmt: str = ""):
-    if value is None:
-        table.add_row(label, "N/A")
-    else:
-        formatted = f"{prefix}{value:{fmt}}{suffix}" if fmt else f"{prefix}{value}{suffix}"
-        display_label = f"{label} ({source})" if source and source != "N/A" else label
-        table.add_row(display_label, formatted)
