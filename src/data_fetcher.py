@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
+import requests
+from bs4 import BeautifulSoup
 import yfinance as yf
 import pandas as pd
 
@@ -11,15 +13,50 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 _MAX_RETRIES = 3
 _BACKOFF_BASE = 2  # seconds: 2, 4, 8
 
+_FINVIZ_URL = "https://finviz.com/quote.ashx?t={ticker}"
+_FINVIZ_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+}
+_FINVIZ_TIMEOUT = 20
+
 
 def _fetch_finviz_fundamentals(ticker: str) -> dict | None:
-    """Fetch fundamental snapshot from finviz. Returns dict or None on failure."""
-    try:
-        from finvizfinance.quote import finvizfinance
-        stock = finvizfinance(ticker)
-        return stock.ticker_fundament()
-    except Exception:
-        return None
+    """Scrape finviz snapshot table with retry and exponential backoff.
+
+    Returns a dict of label→value strings (e.g. {"EPS next 5Y": "10.20%"}),
+    or None on failure.  When a label appears twice (e.g. "EPS next Y"),
+    the second occurrence gets " Percentage" appended.
+    """
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = requests.get(
+                _FINVIZ_URL.format(ticker=ticker),
+                headers=_FINVIZ_HEADERS,
+                timeout=_FINVIZ_TIMEOUT,
+            )
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            table = soup.find("table", class_="snapshot-table2")
+            if table is None:
+                return None
+
+            data: dict[str, str] = {}
+            for row in table.find_all("tr"):
+                cells = [td.text.strip() for td in row.find_all("td")]
+                for i in range(0, len(cells) - 1, 2):
+                    label, value = cells[i], cells[i + 1]
+                    if label in data:
+                        label += " Percentage"
+                    data[label] = value
+            return data if data else None
+        except Exception:
+            if attempt < _MAX_RETRIES - 1:
+                time.sleep(_BACKOFF_BASE ** (attempt + 1))
+    return None
 
 
 def _parse_finviz_pct(value: str) -> float | None:
@@ -59,6 +96,7 @@ def fetch_stock_data(ticker: str) -> dict:
     finviz = _fetch_finviz_fundamentals(ticker)
 
     data = {
+        "_finviz_ok": finviz is not None,
         "name": info.get("shortName") or info.get("longName") or ticker,
         "website": info.get("website"),
         "current_price": info.get("currentPrice") or info.get("regularMarketPrice"),

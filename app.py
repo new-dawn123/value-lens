@@ -19,9 +19,13 @@ from src.valuator import (
 _LOGO_PATH = Path(__file__).parent / "assets" / "logo.png"
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def cached_fetch(ticker: str) -> dict:
-    """Cache yfinance data for 15 minutes to avoid rate limits."""
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_fetch(ticker: str, cache_version: int = 0) -> dict:
+    """Cache stock data for 1 hour.
+
+    cache_version is incremented when finviz failed on a previous fetch,
+    so the next submit bypasses the stale cache and retries finviz.
+    """
     return fetch_stock_data(ticker)
 
 
@@ -98,7 +102,16 @@ if analyze and ticker:
 
     with st.spinner(f"Fetching data for {ticker}..."):
         try:
-            data = cached_fetch(ticker)
+            # Bust cache for tickers where finviz previously failed
+            finviz_fails = st.session_state.setdefault("_finviz_fails", {})
+            cache_ver = finviz_fails.get(ticker, 0)
+            data = cached_fetch(ticker, cache_version=cache_ver)
+
+            if not data.get("_finviz_ok", True):
+                # Next submit will use a new cache key → retry finviz
+                finviz_fails[ticker] = cache_ver + 1
+            else:
+                finviz_fails.pop(ticker, None)
         except Exception as e:
             st.error(f"Error fetching data for {ticker}: {e}")
             st.stop()
