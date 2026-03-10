@@ -29,3 +29,6 @@ docs/
 # Launchers (local only)
 launcher.bat
 launcher-gui.bat
+launcher-batch.bat
+
+*.csv
