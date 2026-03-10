@@ -10,7 +10,6 @@ def print_output(
     scores: dict,
     valuation: dict,
     disregard_hist_premium: bool = False,
-    disregard_quality_adj: bool = False,
 ):
     """Print analysis results to terminal using rich."""
     console = Console(width=65)
@@ -29,7 +28,7 @@ def print_output(
     console.print("-" * 58, style="dim")
 
     _print_detailed(console, data, scores, valuation, gate_messages,
-                    disregard_hist_premium, disregard_quality_adj)
+                    disregard_hist_premium)
 
     console.print()
 
@@ -83,7 +82,6 @@ def _print_detailed(
     valuation: dict,
     warnings: list[str],
     disregard_hist_premium: bool = False,
-    disregard_quality_adj: bool = False,
 ):
     # Metrics table
     console.print("\n[bold]METRICS[/bold]")
@@ -126,8 +124,6 @@ def _print_detailed(
     if scores["peg"] is not None:
         growth_table.add_row("PEG Ratio (ValueLens)", f"{scores['peg']:.2f}  (P/E / Fair P/E)")
     _add_metric_row(growth_table, "P/S Ratio", data.get("ps_ratio"), fmt=".2f")
-    if scores["psg"] is not None:
-        growth_table.add_row("PSG Ratio", f"{scores['psg']:.2f}")
     _add_metric_row(growth_table, "Beta", data.get("beta"), fmt=".2f")
 
     console.print(growth_table)
@@ -142,7 +138,6 @@ def _print_detailed(
 
     for key, display_label in [
         ("peg", "PEG Ratio (ValueLens)"),
-        ("psg", "PSG Ratio"),
         ("eps_revisions", "EPS Revisions"),
         ("earnings_surprises", "Earnings Surprises"),
     ]:
@@ -189,12 +184,6 @@ def _print_detailed(
             hp_label,
             f"{premium_str}  ({details})"
         )
-    quality_adj = valuation.get("quality_adjustment", 1.0)
-    if quality_adj != 1.0:
-        qa_label = "Quality Adjustment"
-        if disregard_quality_adj:
-            qa_label += " [dim](disregarded)[/dim]"
-        val_table.add_row(qa_label, f"{quality_adj:.2f}x  (PSG, revisions, surprises)")
     if valuation["fair_value"]:
         val_table.add_row(
             "Fair Value",

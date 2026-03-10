@@ -40,11 +40,6 @@ def check_gates(data: dict, custom_growth: float | None = None) -> tuple[bool, l
             "historical P/E charts may be unavailable"
         )
 
-    if passed and trailing_pe is not None and growth_5y is not None and growth_5y > 0:
-        peg = trailing_pe / growth_5y
-        if peg > 3.0:
-            messages.append(f"Warning: extremely high PEG ratio ({peg:.2f})")
-
     if current_price is not None and current_price < 5.0:
         messages.append("Warning: penny stock territory (price < $5)")
 

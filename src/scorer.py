@@ -52,18 +52,8 @@ def score_stock(
     else:
         peg = None
 
-    # Compute PSG: P/S / Revenue Growth
-    ps_ratio = data.get("ps_ratio")
-    revenue_growth = data.get("revenue_growth_next_year")
-    psg = None
-    using_psg = False
-    if ps_ratio is not None and revenue_growth is not None and revenue_growth > 0:
-        psg = ps_ratio / revenue_growth
-        using_psg = True
-
     # Score each metric
     peg_score = _score_peg(peg)
-    psg_score = _score_psg(psg, using_psg)
     revision_score = _score_eps_revisions(data.get("eps_revisions"))
     surprise_score = _score_earnings_surprises(data.get("earnings_history"))
 
@@ -72,15 +62,13 @@ def score_stock(
 
     # Weighted combination
     weights = {
-        "peg": 0.45,
-        "psg": 0.30,
-        "eps_revisions": 0.15,
+        "peg": 0.70,
+        "eps_revisions": 0.20,
         "earnings_surprises": 0.10,
     }
 
     weighted_sum = (
         peg_score * weights["peg"]
-        + psg_score * weights["psg"]
         + revision_score * weights["eps_revisions"]
         + surprise_score * weights["earnings_surprises"]
     )
@@ -94,12 +82,9 @@ def score_stock(
         "final_score": final_score,
         "label": label,
         "peg": peg,
-        "psg": psg,
-        "using_psg": using_psg,
         "blended_growth": blended_growth,
         "breakdown": {
             "peg": {"score": peg_score, "weight": weights["peg"]},
-            "psg": {"score": psg_score, "weight": weights["psg"]},
             "eps_revisions": {"score": revision_score, "weight": weights["eps_revisions"]},
             "earnings_surprises": {"score": surprise_score, "weight": weights["earnings_surprises"]},
         },
@@ -161,20 +146,6 @@ def _score_peg(peg: float | None) -> float:
     if peg < 2.0:
         return 2.0
     return 0.0
-
-
-def _score_psg(psg: float | None, using_psg: bool) -> float:
-    """Score PSG ratio on 0-10 scale."""
-    if psg is None or not using_psg:
-        return 5.0  # neutral if unavailable
-
-    if psg < 0.5:
-        return 10.0
-    if psg < 1.0:
-        return 8.0
-    if psg < 2.0:
-        return 5.0
-    return 2.0
 
 
 def _score_eps_revisions(revisions: dict | None) -> float:

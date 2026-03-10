@@ -5,27 +5,22 @@ import statistics
 
 from src.scorer import BASE_PE, _GROWTH_DAMPEN_K, _fair_pe
 
-_QUALITY_K = 0.03  # +-15% at extremes
-
-
 def calculate_valuation(
     data: dict,
     custom_eps: float | None = None,
     custom_growth: float | None = None,
     scores: dict | None = None,
     disregard_hist_premium: bool = False,
-    disregard_quality_adj: bool = False,
 ) -> dict:
     """Calculate fair value, entry price, and exit price.
 
     Single-flow approach:
-        fair_value = PEG_fair_price × historical_premium × quality_adjustment
+        fair_value = PEG_fair_price × historical_premium
 
     1. PEG fair price: BASE_PE × (1 + dampened_growth/100)^5 × EPS
     2. Historical premium: median_actual_PE / model_fair_PE(raw_historical_growth)
        — captures persistent market premium/discount (moat, quality, etc.)
-       — clamped [0.85, 1.15], defaults to 1.0 when data is insufficient.
-    3. Quality adjustment: ±15% from PSG/revisions/surprises scores.
+       — clamped [0.80, 1.20], defaults to 1.0 when data is insufficient.
 
     Entry price: beta-scaled growth scenario (pessimistic fair value).
     Exit price: historical P/E stretch premium above entry.
@@ -50,17 +45,13 @@ def calculate_valuation(
     # Step 2: Historical premium/discount multiplier
     hist_premium = _compute_historical_premium(data, hist_pes)
 
-    # Step 3: Quality adjustment from non-PEG score components
-    quality_adjustment = _compute_quality_adjustment(scores)
-
-    # Effective multipliers (1.0 when disregarded)
+    # Effective multiplier (1.0 when disregarded)
     eff_premium = 1.0 if disregard_hist_premium else hist_premium["premium"]
-    eff_quality = 1.0 if disregard_quality_adj else quality_adjustment
 
-    # Combine: fair_value = peg_price × premium × quality
+    # Combine: fair_value = peg_price × premium
     fair_value = peg_result["fair_price"]
     if fair_value is not None:
-        fair_value = fair_value * eff_premium * eff_quality
+        fair_value = fair_value * eff_premium
 
     # Entry: beta-scaled growth scenario
     entry_price = None
@@ -68,7 +59,7 @@ def calculate_valuation(
     if fair_value is not None and growth_for_peg is not None:
         entry_price, margin_of_safety = _calculate_entry(
             fair_value, growth_for_peg, eps, beta,
-            eff_premium, eff_quality,
+            eff_premium,
         )
 
     # Exit: historical P/E stretch above entry
@@ -90,38 +81,9 @@ def calculate_valuation(
         "margin_of_safety": margin_of_safety,
         "exit_premium": exit_premium,
         "pe_stretch": pe_stretch,
-        "quality_adjustment": quality_adjustment,
         "peg_method": peg_result,
         "historical_premium": hist_premium,
     }
-
-
-def _compute_quality_adjustment(scores: dict | None) -> float:
-    """Compute quality multiplier from non-PEG score components.
-
-    Uses PSG (30/55), EPS Revisions (15/55), Earnings Surprises (10/55).
-    Maps quality average [0, 10] to multiplier [0.85, 1.15].
-    Returns 1.0 (no adjustment) when scores are not available.
-    """
-    if not scores or "breakdown" not in scores:
-        return 1.0
-
-    breakdown = scores["breakdown"]
-    psg_score = breakdown.get("psg", {}).get("score", 5.0)
-    revision_score = breakdown.get("eps_revisions", {}).get("score", 5.0)
-    surprise_score = breakdown.get("earnings_surprises", {}).get("score", 5.0)
-
-    # Weighted average using original relative weights (excluding PEG)
-    psg_w, rev_w, sur_w = 0.30, 0.15, 0.10
-    total_w = psg_w + rev_w + sur_w
-
-    quality_avg = (
-        psg_score * (psg_w / total_w)
-        + revision_score * (rev_w / total_w)
-        + surprise_score * (sur_w / total_w)
-    )
-
-    return 1.0 + (quality_avg - 5.0) * _QUALITY_K
 
 
 def _dampen_growth(growth: float, k: float = _GROWTH_DAMPEN_K) -> float:
@@ -375,7 +337,7 @@ def _compute_historical_premium(
 
     # Premium: how much more/less the market paid vs model expectation
     premium = median_pe / model_pe
-    premium = max(0.85, min(1.15, premium))  # Clamp ±15%
+    premium = max(0.80, min(1.20, premium))  # Clamp ±20%
 
     return {
         "premium": round(premium, 2),
@@ -448,7 +410,6 @@ def _calculate_entry(
     eps: float,
     beta: float,
     premium: float,
-    quality: float,
 ) -> tuple[float, float]:
     """Beta-scaled growth scenario entry price.
 
@@ -457,7 +418,7 @@ def _calculate_entry(
 
         shock = 0.10 × (0.5 + 0.5 × beta), clamped [0.05, 0.25]
         entry_growth = growth × (1 - shock)   [worse direction for neg growth]
-        entry_price  = fair_pe(entry_growth) × EPS × premium × quality
+        entry_price  = fair_pe(entry_growth) × EPS × premium
         entry discount clamped [3%, 15%]
 
     Returns (entry_price, entry_discount).
@@ -473,7 +434,7 @@ def _calculate_entry(
     peg_entry = _peg_implied_fair_value(eps, g_entry)
 
     if peg_entry["fair_price"]:
-        entry_raw = peg_entry["fair_price"] * premium * quality
+        entry_raw = peg_entry["fair_price"] * premium
     else:
         entry_raw = fair_value * 0.95
 

@@ -25,10 +25,6 @@ def main():
         "--no-hist-premium", action="store_true",
         help="Disregard Historical Premium (still shown, not applied to Fair Value)"
     )
-    parser.add_argument(
-        "--no-quality-adj", action="store_true",
-        help="Disregard Quality Adjustment (still shown, not applied to Fair Value)"
-    )
     args = parser.parse_args()
 
     ticker = args.ticker.upper()
@@ -49,7 +45,6 @@ def main():
     valuation = calculate_valuation(
         data, custom_eps=args.eps, custom_growth=args.growth, scores=scores,
         disregard_hist_premium=args.no_hist_premium,
-        disregard_quality_adj=args.no_quality_adj,
     )
     scores = apply_price_cap(scores, data, valuation)
 
@@ -60,7 +55,6 @@ def main():
         scores=scores,
         valuation=valuation,
         disregard_hist_premium=args.no_hist_premium,
-        disregard_quality_adj=args.no_quality_adj,
     )
 
 
