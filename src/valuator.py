@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import statistics
 
-from src.scorer import BASE_PE, _GROWTH_DAMPEN_K, _fair_pe
+from src.scorer import BASE_PE, _GROWTH_DAMPEN_THRESHOLD, _GROWTH_DAMPEN_K, _fair_pe
 
 def calculate_valuation(
     data: dict,
@@ -86,11 +86,18 @@ def calculate_valuation(
     }
 
 
-def _dampen_growth(growth: float, k: float = _GROWTH_DAMPEN_K) -> float:
-    """Log-dampen a positive growth rate to compress optimistic estimates."""
+def _dampen_growth(
+    growth: float,
+    threshold: float = _GROWTH_DAMPEN_THRESHOLD,
+    k: float = _GROWTH_DAMPEN_K,
+) -> float:
+    """Delayed log-dampen: no compression up to threshold, then compress excess."""
     if growth <= 0:
         return growth
-    return k * math.log(1 + growth / k)
+    if growth <= threshold:
+        return growth
+    excess = growth - threshold
+    return threshold + k * math.log(1 + excess / k)
 
 
 def _compute_effective_growth(data: dict) -> float | None:
@@ -419,7 +426,7 @@ def _calculate_entry(
         shock = 0.10 × (0.5 + 0.5 × beta), clamped [0.05, 0.25]
         entry_growth = growth × (1 - shock)   [worse direction for neg growth]
         entry_price  = fair_pe(entry_growth) × EPS × premium
-        entry discount clamped [3%, 15%]
+        entry discount clamped [0%, 10%]
 
     Returns (entry_price, entry_discount).
     """
@@ -439,7 +446,7 @@ def _calculate_entry(
         entry_raw = fair_value * 0.95
 
     entry_discount = (fair_value - entry_raw) / fair_value
-    entry_discount = max(0.03, min(0.15, entry_discount))
+    entry_discount = max(0.0, min(0.10, entry_discount))
     entry_price = round(fair_value * (1 - entry_discount), 2)
 
     return entry_price, round(entry_discount, 4)

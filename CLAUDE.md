@@ -43,7 +43,7 @@ Both entry points (`app.py`, `analyze.py`) follow the same pipeline through five
 | `valuator.py` | Fair Value = PEG fair price x historical premium. Entry price from beta-scaled growth scenario. Exit price from historical P/E stretch. |
 | `formatter.py` | Rich terminal output for CLI. Not used by Streamlit (app.py renders its own UI with Plotly charts). |
 
-**Key constants** in `scorer.py`: `BASE_PE = 12.0` (zero-growth P/E anchor), `_GROWTH_DAMPEN_K = 80.0` (growth compression). Historical premium in `valuator.py` clamped to ±20%.
+**Key constants** in `scorer.py`: `BASE_PE = 12.0` (zero-growth P/E anchor), `_GROWTH_DAMPEN_THRESHOLD = 15.0` (no dampening up to 15%), `_GROWTH_DAMPEN_K = 30.0` (compression factor for excess above threshold). Historical premium in `valuator.py` clamped to ±20%.
 
 **Data flow:** All modules communicate via plain `dict` objects — `data` (fetched metrics), `scores` (scoring output), `valuation` (pricing output).
 

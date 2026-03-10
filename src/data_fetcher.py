@@ -110,7 +110,7 @@ def fetch_stock_data(ticker: str) -> dict:
         "market_cap": info.get("marketCap"),
     }
 
-    # 5-year estimated EPS growth (finviz primary, yfinance fallback)
+    # 5-year estimated EPS growth (finviz only, no fallback)
     growth_5y, growth_5y_source = _get_growth_estimate(stock, finviz)
     data["growth_5y"] = growth_5y
     data["growth_5y_source"] = growth_5y_source
@@ -204,59 +204,17 @@ def _fetch_info_with_retry(ticker: str) -> tuple[yf.Ticker, dict]:
 def _get_growth_estimate(
     stock: yf.Ticker, finviz: dict | None = None,
 ) -> tuple[float | None, str]:
-    """Extract estimated EPS growth rate with fallback chain.
+    """Extract estimated 5Y EPS growth rate from finviz only.
 
-    Priority:
-    1. Finviz 'EPS next 5Y'
-    2. Long-term growth (LTG) from yfinance growth_estimates (5Y estimate)
-    3. Average of current-year and next-year growth from yfinance earnings_estimate
-    4. earningsGrowth from yfinance ticker info
+    Requires finviz 'EPS next 5Y'. No fallback — if finviz is unavailable
+    or missing the field, returns None (hard gate will block scoring).
 
     Returns (value, source_label).
     """
-    # Try 1: Finviz 'EPS next 5Y'
     if finviz:
         val = _parse_finviz_pct(finviz.get("EPS next 5Y"))
         if val is not None:
             return val, "finviz"
-
-    # Try 2: LTG from growth_estimates
-    try:
-        ge = stock.growth_estimates
-        if ge is not None and not ge.empty:
-            for row_label in ["LTG", "+5y"]:
-                if row_label in ge.index:
-                    for col in ["stockTrend", "stock"]:
-                        if col in ge.columns:
-                            val = ge.loc[row_label, col]
-                            if val is not None and pd.notna(val):
-                                return float(val) * 100, "yfinance"
-    except Exception:
-        pass
-
-    # Try 3: Average of 0y and +1y growth from earnings_estimate
-    try:
-        ee = stock.earnings_estimate
-        if ee is not None and not ee.empty and "growth" in ee.columns:
-            growth_values = []
-            for period in ["0y", "+1y"]:
-                if period in ee.index:
-                    val = ee.loc[period, "growth"]
-                    if val is not None and pd.notna(val):
-                        growth_values.append(float(val))
-            if growth_values:
-                return (sum(growth_values) / len(growth_values)) * 100, "yfinance"
-    except Exception:
-        pass
-
-    # Try 4: earningsGrowth from info
-    try:
-        info = stock.info
-        eg = info.get("earningsGrowth")
-        if eg is not None:
-            return float(eg) * 100, "yfinance"
-    except Exception:
-        pass
 
     return None, "N/A"
 

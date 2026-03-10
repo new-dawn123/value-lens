@@ -382,18 +382,7 @@ if "result" in st.session_state:
                 "Beta": f"{data['beta']:.2f}" if data.get("beta") else "N/A",
             })
 
-            growth_sources = sorted({
-                src for key in (
-                    "growth_current_year_source", "growth_next_year_source",
-                    "growth_5y_source", "historical_growth_5y_source",
-                )
-                if (src := data.get(key)) and src != "N/A"
-            } | ({"finviz"} if any(
-                data.get(k) is not None
-                for k in ("historical_growth_3y", "sales_growth_3y", "sales_growth_5y")
-            ) else set()))
-            growth_src_suffix = f" ({', '.join(growth_sources)})" if growth_sources else ""
-            st.markdown(f"**Growth{growth_src_suffix}**")
+            st.markdown("**Growth**")
 
             _metrics_table({
                 "0Y EPS Growth": f"{data['growth_current_year']:.1f}%" if data.get("growth_current_year") else "N/A",

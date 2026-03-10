@@ -93,21 +93,8 @@ def _print_detailed(
     _add_metric_row(metrics_table, "Forward P/E", data.get("forward_pe"), fmt=".2f")
     _add_metric_row(metrics_table, "Trailing EPS", data.get("trailing_eps"), prefix="$", fmt=".2f")
 
-    growth_sources = sorted({
-        src for key in (
-            "growth_current_year_source", "growth_next_year_source",
-            "growth_5y_source", "historical_growth_5y_source",
-        )
-        if (src := data.get(key)) and src != "N/A"
-    } | ({"finviz"} if any(
-        data.get(k) is not None
-        for k in ("historical_growth_3y", "sales_growth_3y", "sales_growth_5y")
-    ) else set()))
-    growth_header = "GROWTH"
-    if growth_sources:
-        growth_header += f" ({', '.join(growth_sources)})"
     console.print(metrics_table)
-    console.print(f"\n[bold]{growth_header}[/bold]")
+    console.print(f"\n[bold]GROWTH[/bold]")
     growth_table = Table(show_header=False, box=None, padding=(0, 2))
     growth_table.add_column("Metric", style="dim")
     growth_table.add_column("Value")

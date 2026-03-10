@@ -5,9 +5,11 @@ import math
 # P/E that a zero-growth company deserves (~perpetuity at 7-8% discount rate).
 BASE_PE = 12.0
 
-# Dampening factor for 5Y growth estimates. Higher k = less compression.
-# k=80 is light: 10%->9.4%, 20%->17.9%, 30%->25.5%, 50%->38.8%.
-_GROWTH_DAMPEN_K = 80.0
+# Delayed dampening: no compression up to _GROWTH_DAMPEN_THRESHOLD,
+# then log-dampen the excess with k=_GROWTH_DAMPEN_K.
+# t=15,k=30: 15%->15.0%, 25%->23.6%, 30%->27.2%, 50%->33.5%, 100%->55.3%.
+_GROWTH_DAMPEN_THRESHOLD = 15.0
+_GROWTH_DAMPEN_K = 30.0
 
 
 def _fair_pe(growth: float) -> float:
@@ -91,28 +93,36 @@ def score_stock(
     }
 
 
-def _dampen_growth(growth: float, k: float = _GROWTH_DAMPEN_K) -> float:
-    """Log-dampen a positive growth rate to compress optimistic estimates.
+def _dampen_growth(
+    growth: float,
+    threshold: float = _GROWTH_DAMPEN_THRESHOLD,
+    k: float = _GROWTH_DAMPEN_K,
+) -> float:
+    """Delayed log-dampen: no compression up to *threshold*, then compress excess.
 
-    dampen(growth, k) = k * ln(1 + growth / k)
+    For growth <= threshold:  output = growth  (trusted as-is)
+    For growth > threshold:   output = threshold + k * ln(1 + (growth - threshold) / k)
 
-    Examples with k=80:
-        10% -> ~9.4%,  20% -> ~17.9%,  30% -> ~25.5%,  50% -> ~38.8%
+    Examples with t=15, k=30:
+        10% -> 10.0%,  15% -> 15.0%,  25% -> 23.6%,
+        30% -> 27.2%,  50% -> 33.5%,  100% -> 55.3%
 
     Negative growth is returned as-is (no compression needed for pessimism).
     """
     if growth <= 0:
         return growth
-    return k * math.log(1 + growth / k)
+    if growth <= threshold:
+        return growth
+    excess = growth - threshold
+    return threshold + k * math.log(1 + excess / k)
 
 
 def _compute_effective_growth(data: dict) -> float | None:
     """Compute effective growth for PEG: dampened 5Y estimate.
 
-    Uses only the long-term 5Y growth estimate, log-dampened (k=80) to
-    lightly compress aggressive analyst projections.  The exponential
-    fair P/E model (BASE_PE * coeff^5) already provides natural compression,
-    so only a light dampening is needed.
+    Uses only the long-term 5Y growth estimate with delayed dampening:
+    growth up to 15% is trusted as-is, excess above 15% is log-dampened
+    (k=30) to compress aggressive analyst projections.
 
     Supports negative growth — the compounding model handles it naturally.
     Returns None if no 5Y growth data is available.
