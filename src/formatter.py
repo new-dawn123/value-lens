@@ -42,39 +42,6 @@ def print_gate_failure(ticker: str, name: str, messages: list[str]):
     console.print()
 
 
-def _print_concise(
-    console: Console,
-    data: dict,
-    scores: dict,
-    valuation: dict,
-    warnings: list[str],
-):
-    score = scores["final_score"]
-    label = scores["label"]
-    color = _score_color(score)
-
-    console.print(f"  Investibility Score:  [{color}]{score}/100  [{label}][/{color}]")
-
-    if valuation["fair_value"]:
-        console.print(f"  Fair Value:           ${valuation['fair_value']:,.2f}")
-    if valuation["entry_price"]:
-        margin_pct = round(valuation["margin_of_safety"] * 100)
-        console.print(
-            f"  Entry Price:          [green]<= ${valuation['entry_price']:,.2f}[/green]"
-            f"  ({margin_pct}% margin of safety)"
-        )
-    if valuation["exit_price"]:
-        exit_pct = round(valuation.get("exit_premium", 0) * 100)
-        console.print(
-            f"  Exit Price:           [red]>= ${valuation['exit_price']:,.2f}[/red]"
-            f"  ({exit_pct}% above entry)"
-        )
-    if scores["peg"] is not None:
-        console.print(f"  PEG Ratio:            {scores['peg']:.2f}")
-
-    _print_warnings(console, warnings)
-
-
 def _print_detailed(
     console: Console,
     data: dict,
@@ -178,7 +145,6 @@ def _print_detailed(
         )
     margin_pct = round(valuation["margin_of_safety"] * 100)
     exit_pct = round(valuation.get("exit_premium", 0) * 100)
-    pe_stretch = valuation.get("pe_stretch", 1.0)
     val_table.add_row("Margin of Safety", f"{margin_pct}%")
     val_table.add_row("Exit Premium", f"{exit_pct}%")
     if valuation["entry_price"]:

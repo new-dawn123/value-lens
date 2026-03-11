@@ -27,7 +27,7 @@ def main():
     )
     args = parser.parse_args()
 
-    ticker = args.ticker.upper()
+    ticker = args.ticker.upper().strip()
 
     try:
         data = fetch_stock_data(ticker)

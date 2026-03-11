@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-import math
 import statistics
 
-from src.scorer import BASE_PE, _GROWTH_DAMPEN_THRESHOLD, _GROWTH_DAMPEN_K, _fair_pe
+from src.scorer import (
+    BASE_PE,
+    _fair_pe,
+    _dampen_growth,
+    _compute_effective_growth,
+)
 
 def calculate_valuation(
     data: dict,
@@ -84,33 +88,6 @@ def calculate_valuation(
         "peg_method": peg_result,
         "historical_premium": hist_premium,
     }
-
-
-def _dampen_growth(
-    growth: float,
-    threshold: float = _GROWTH_DAMPEN_THRESHOLD,
-    k: float = _GROWTH_DAMPEN_K,
-) -> float:
-    """Delayed log-dampen: no compression up to threshold, then compress excess."""
-    if growth <= 0:
-        return growth
-    if growth <= threshold:
-        return growth
-    excess = growth - threshold
-    return threshold + k * math.log(1 + excess / k)
-
-
-def _compute_effective_growth(data: dict) -> float | None:
-    """Compute effective growth: dampened 5Y estimate (supports negative)."""
-    growth_5y = data.get("growth_5y")
-
-    if growth_5y is None:
-        return None
-
-    if growth_5y > 0:
-        return _dampen_growth(growth_5y)
-
-    return growth_5y
 
 
 def compute_historical_pe_series(data: dict) -> list[dict]:
@@ -295,7 +272,7 @@ def _compute_historical_premium(
     given its historical growth rate.
 
         model_fair_pe = BASE_PE × (1 + hist_growth/100)^5
-        premium       = median_actual_pe / model_fair_pe   (clamped [0.85, 1.15])
+        premium       = median_actual_pe / model_fair_pe   (clamped [0.80, 1.20])
 
     A premium > 1 means the market has historically paid more than the model
     predicts (brand moat, quality perception, etc.).  A discount < 1 means

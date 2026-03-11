@@ -15,7 +15,6 @@ def check_gates(data: dict, custom_growth: float | None = None) -> tuple[bool, l
     trailing_eps = data.get("trailing_eps")
     growth_5y = custom_growth if custom_growth is not None else data.get("growth_5y")
     current_price = data.get("current_price")
-    trailing_pe = data.get("trailing_pe")
 
     # Hard gates — block scoring
     if trailing_eps is None or trailing_eps <= 0:

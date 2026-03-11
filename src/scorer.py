@@ -7,7 +7,7 @@ BASE_PE = 12.0
 
 # Delayed dampening: no compression up to _GROWTH_DAMPEN_THRESHOLD,
 # then log-dampen the excess with k=_GROWTH_DAMPEN_K.
-# t=15,k=30: 15%->15.0%, 25%->23.6%, 30%->27.2%, 50%->33.5%, 100%->55.3%.
+# t=15,k=30: 15%->15.0%, 25%->23.6%, 30%->27.2%, 50%->38.2%, 100%->55.3%.
 _GROWTH_DAMPEN_THRESHOLD = 15.0
 _GROWTH_DAMPEN_K = 30.0
 
@@ -34,7 +34,6 @@ def score_stock(
     Custom growth is dampened the same way as fetched growth.
     """
     eps = custom_eps if custom_eps is not None else data.get("trailing_eps", 0)
-    growth_5y = data.get("growth_5y", 0)
     trailing_pe = data.get("trailing_pe")
 
     # Growth: use custom override (dampened) or compute dampened 5Y
@@ -105,7 +104,7 @@ def _dampen_growth(
 
     Examples with t=15, k=30:
         10% -> 10.0%,  15% -> 15.0%,  25% -> 23.6%,
-        30% -> 27.2%,  50% -> 33.5%,  100% -> 55.3%
+        30% -> 27.2%,  50% -> 38.2%,  100% -> 55.3%
 
     Negative growth is returned as-is (no compression needed for pessimism).
     """
