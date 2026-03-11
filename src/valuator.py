@@ -78,6 +78,17 @@ def calculate_valuation(
     if fair_value is not None:
         fair_value = round(fair_value, 2)
 
+    # Net cash/debt adjustment: shift from earnings-based to equity value
+    # Applied last, after all earnings-based calculations (premium, beta, stretch)
+    net_cash = data.get("net_cash_per_share")
+    if net_cash is not None:
+        if fair_value is not None:
+            fair_value = round(fair_value + net_cash, 2)
+        if entry_price is not None:
+            entry_price = round(entry_price + net_cash, 2)
+        if exit_price is not None:
+            exit_price = round(exit_price + net_cash, 2)
+
     return {
         "fair_value": fair_value,
         "entry_price": entry_price,
@@ -87,6 +98,7 @@ def calculate_valuation(
         "pe_stretch": pe_stretch,
         "peg_method": peg_result,
         "historical_premium": hist_premium,
+        "net_cash_per_share": net_cash,
     }
 
 

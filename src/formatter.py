@@ -138,6 +138,18 @@ def _print_detailed(
             hp_label,
             f"{premium_str}  ({details})"
         )
+    net_cash = valuation.get("net_cash_per_share")
+    if net_cash is not None:
+        cash_ps = data.get("cash_per_share", 0)
+        debt_ps = data.get("debt_per_share", 0)
+        cap_ps = data.get("capital_lease_per_share", 0)
+        sign = "+" if net_cash >= 0 else "-"
+        val_table.add_row(
+            "Net Cash Adj.",
+            f"{sign}${abs(net_cash):,.2f}  (cash = ${cash_ps:,.2f}"
+            f"\n              debt = ${debt_ps:,.2f}"
+            f"\n              leases = ${cap_ps:,.2f})"
+        )
     if valuation["fair_value"]:
         val_table.add_row(
             "Fair Value",

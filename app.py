@@ -452,6 +452,18 @@ if "result" in st.session_state:
                     "Detail": detail,
                 })
 
+            net_cash = valuation.get("net_cash_per_share")
+            if net_cash is not None:
+                cash_ps = data.get("cash_per_share", 0)
+                debt_ps = data.get("debt_per_share", 0)
+                cap_ps = data.get("capital_lease_per_share", 0)
+                sign = "+" if net_cash >= 0 else "-"
+                val_rows.append({
+                    "Method": "Net Cash Adj.",
+                    "Value": f"{sign}${abs(net_cash):,.2f}",
+                    "Detail": f"Cash = ${cash_ps:,.2f}<br>Debt = ${debt_ps:,.2f}<br>Leases = ${cap_ps:,.2f}",
+                })
+
             if valuation.get("fair_value"):
                 val_rows.append({
                     "Method": "<b>Fair Value</b>",

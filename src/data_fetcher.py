@@ -184,7 +184,58 @@ def fetch_stock_data(ticker: str) -> dict:
     # Legacy flag: true when EPS is still in the wrong currency (FX fetch failed)
     data["currency_mismatch"] = _detect_currency_mismatch(data)
 
+    # Balance sheet: cash, debt, capital leases per share
+    _populate_balance_sheet_fields(stock, info, data)
+
     return data
+
+
+def _populate_balance_sheet_fields(
+    stock: yf.Ticker, info: dict, data: dict,
+) -> None:
+    """Populate cash, debt, and capital lease per-share fields.
+
+    All absolute values (totalCash, totalDebt, Capital Lease Obligations)
+    are in financialCurrency.  When FX conversion is active, multiply by
+    fx_rate to express in price currency (same treatment as EPS).
+    """
+    shares = info.get("sharesOutstanding")
+    total_cash = info.get("totalCash")
+    total_debt = info.get("totalDebt")
+
+    if not shares or shares <= 0 or total_cash is None or total_debt is None:
+        data["cash_per_share"] = None
+        data["debt_per_share"] = None
+        data["capital_lease_per_share"] = None
+        data["net_cash_per_share"] = None
+        return
+
+    cash_ps = total_cash / shares
+    debt_ps = total_debt / shares
+
+    # Capital lease obligations from balance sheet (0 when absent)
+    cap_lease_ps = 0.0
+    try:
+        bs = stock.balance_sheet
+        if bs is not None and not bs.empty:
+            if "Capital Lease Obligations" in bs.index:
+                val = bs.loc["Capital Lease Obligations"].iloc[0]
+                if val is not None and pd.notna(val):
+                    cap_lease_ps = float(val) / shares
+    except Exception:
+        pass
+
+    # FX conversion: absolute financials are in financialCurrency
+    if data.get("fx_converted"):
+        fx_rate = data.get("fx_rate", 1.0)
+        cash_ps *= fx_rate
+        debt_ps *= fx_rate
+        cap_lease_ps *= fx_rate
+
+    data["cash_per_share"] = round(cash_ps, 2)
+    data["debt_per_share"] = round(debt_ps, 2)
+    data["capital_lease_per_share"] = round(cap_lease_ps, 2)
+    data["net_cash_per_share"] = round(cash_ps - debt_ps - cap_lease_ps, 2)
 
 
 def _fetch_info_with_retry(ticker: str) -> tuple[yf.Ticker, dict]:
