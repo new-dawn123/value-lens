@@ -25,6 +25,10 @@ def main():
         "--no-hist-premium", action="store_true",
         help="Disregard Historical Premium (still shown, not applied to Fair Value)"
     )
+    parser.add_argument(
+        "--uncap-hist-premium", action="store_true",
+        help="Remove the ±20%% clamp (0.80–1.20) on the historical premium"
+    )
     args = parser.parse_args()
 
     ticker = args.ticker.upper().strip()
@@ -45,6 +49,7 @@ def main():
     valuation = calculate_valuation(
         data, custom_eps=args.eps, custom_growth=args.growth, scores=scores,
         disregard_hist_premium=args.no_hist_premium,
+        uncap_hist_premium=args.uncap_hist_premium,
     )
     scores = apply_price_cap(scores, data, valuation)
 
