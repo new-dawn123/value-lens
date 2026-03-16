@@ -15,6 +15,7 @@ def calculate_valuation(
     custom_growth: float | None = None,
     scores: dict | None = None,
     disregard_hist_premium: bool = False,
+    uncap_hist_premium: bool = False,
 ) -> dict:
     """Calculate fair value, entry price, and exit price.
 
@@ -24,7 +25,7 @@ def calculate_valuation(
     1. PEG fair price: BASE_PE × (1 + dampened_growth/100)^5 × EPS
     2. Historical premium: median_actual_PE / model_fair_PE(raw_historical_growth)
        — captures persistent market premium/discount (moat, quality, etc.)
-       — clamped [0.80, 1.20], defaults to 1.0 when data is insufficient.
+       — clamped [0.80, 1.20] (unless uncapped), defaults to 1.0 when data is insufficient.
 
     Entry price: beta-scaled growth scenario (pessimistic fair value).
     Exit price: historical P/E stretch premium above entry.
@@ -47,7 +48,7 @@ def calculate_valuation(
     peg_result = _peg_implied_fair_value(eps, growth_for_peg)
 
     # Step 2: Historical premium/discount multiplier
-    hist_premium = _compute_historical_premium(data, hist_pes)
+    hist_premium = _compute_historical_premium(data, hist_pes, uncap=uncap_hist_premium)
 
     # Effective multiplier (1.0 when disregarded)
     eff_premium = 1.0 if disregard_hist_premium else hist_premium["premium"]
@@ -276,6 +277,7 @@ def _peg_implied_fair_value(eps: float, growth: float) -> dict:
 
 def _compute_historical_premium(
     data: dict, hist_pes: list[float] | None = None,
+    uncap: bool = False,
 ) -> dict:
     """Compute a premium/discount multiplier from historical P/E vs model fair P/E.
 
@@ -284,7 +286,7 @@ def _compute_historical_premium(
     given its historical growth rate.
 
         model_fair_pe = BASE_PE × (1 + hist_growth/100)^5
-        premium       = median_actual_pe / model_fair_pe   (clamped [0.80, 1.20])
+        premium       = median_actual_pe / model_fair_pe   (clamped [0.80, 1.20] unless uncapped)
 
     A premium > 1 means the market has historically paid more than the model
     predicts (brand moat, quality perception, etc.).  A discount < 1 means
@@ -333,7 +335,8 @@ def _compute_historical_premium(
 
     # Premium: how much more/less the market paid vs model expectation
     premium = median_pe / model_pe
-    premium = max(0.80, min(1.20, premium))  # Clamp ±20%
+    if not uncap:
+        premium = max(0.80, min(1.20, premium))  # Clamp ±20%
 
     return {
         "premium": round(premium, 2),

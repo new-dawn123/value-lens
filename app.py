@@ -90,6 +90,10 @@ with st.expander("Advanced Options"):
         "Disregard Historical Premium",
         help="Still calculated and shown, but not applied to Fair Value.",
     )
+    uncap_hist_premium = st.checkbox(
+        "Uncap Historical Premium",
+        help="Remove the ±20% clamp (0.80–1.20) on the historical premium.",
+    )
 
 
 # --- Orchestration ---
@@ -128,6 +132,7 @@ if analyze and ticker:
     valuation = calculate_valuation(
         data, custom_eps=custom_eps, custom_growth=custom_growth, scores=scores,
         disregard_hist_premium=disregard_hist_premium,
+        uncap_hist_premium=uncap_hist_premium,
     )
     scores = apply_price_cap(scores, data, valuation)
     pe_series = compute_historical_pe_series(data)
