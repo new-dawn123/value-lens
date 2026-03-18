@@ -145,9 +145,11 @@ The PEG fair price is built from `BASE_PE x (1 + g)^5 x EPS` — a growth-compou
 | META | $37.30 | $38.90 | $11.50 | -$13.10 | -1.9% |
 | ORCL | $6.88 | $45.83 | $4.01 | -$42.97 | -22.3% |
 
-### Fallback
+### Exclusions and Fallbacks
 
-When balance sheet data is unavailable (`totalCash`, `totalDebt`, or `sharesOutstanding` missing), no adjustment is applied (equivalent to net cash = 0).
+- **Financial sector**: Banks, insurance companies, and asset managers are excluded (`sector` = "Financial Services" or "Financial"). Their cash and debt are operating assets/liabilities, not excess cash or financing leverage.
+- **Negative entry price gate**: If the net cash adjustment pushes the entry price below zero, a hard gate blocks the output. This signals that debt overwhelms earnings power and the model cannot produce a meaningful valuation.
+- **Missing data**: When balance sheet data is unavailable (`totalCash`, `totalDebt`, or `sharesOutstanding` missing), no adjustment is applied (equivalent to net cash = 0).
 
 ---
 
