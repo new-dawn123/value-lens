@@ -2,7 +2,7 @@ import argparse
 import sys
 
 from src.data_fetcher import fetch_stock_data
-from src.gates import check_gates
+from src.gates import check_gates, check_post_valuation_gates
 from src.scorer import apply_price_cap, score_stock
 from src.valuator import calculate_valuation
 from src.formatter import print_output, print_gate_failure
@@ -51,6 +51,11 @@ def main():
         disregard_hist_premium=args.no_hist_premium,
         uncap_hist_premium=args.uncap_hist_premium,
     )
+    post_passed, post_messages = check_post_valuation_gates(valuation)
+    if not post_passed:
+        print_gate_failure(ticker, data.get("name", "Unknown"), post_messages)
+        sys.exit(0)
+
     scores = apply_price_cap(scores, data, valuation)
 
     print_output(

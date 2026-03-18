@@ -43,3 +43,26 @@ def check_gates(data: dict, custom_growth: float | None = None) -> tuple[bool, l
         messages.append("Warning: penny stock territory (price < $5)")
 
     return passed, messages
+
+
+def check_post_valuation_gates(valuation: dict) -> tuple[bool, list[str]]:
+    """Post-valuation hard gates.
+
+    Catches conditions that can only be evaluated after the valuation
+    pipeline has run (e.g., net-cash adjustment pushing prices negative).
+
+    Returns (passed, messages) — same contract as check_gates().
+    """
+    messages = []
+    passed = True
+
+    entry = valuation.get("entry_price")
+    if entry is not None and entry <= 0:
+        net_cash = valuation.get("net_cash_per_share")
+        messages.append(
+            f"Cannot value: debt overwhelms earnings power "
+            f"(net cash adjustment = ${net_cash:,.2f}/sh)"
+        )
+        passed = False
+
+    return passed, messages

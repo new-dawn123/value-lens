@@ -190,15 +190,30 @@ def fetch_stock_data(ticker: str) -> dict:
     return data
 
 
+_FINANCIAL_SECTORS = {"Financial Services", "Financial"}
+
+
 def _populate_balance_sheet_fields(
     stock: yf.Ticker, info: dict, data: dict,
 ) -> None:
     """Populate cash, debt, and capital lease per-share fields.
 
+    Skipped for financial-sector companies (banks, insurance, asset managers)
+    where cash and debt are operating assets/liabilities, not excess
+    cash or financing leverage.
+
     All absolute values (totalCash, totalDebt, Capital Lease Obligations)
     are in financialCurrency.  When FX conversion is active, multiply by
     fx_rate to express in price currency (same treatment as EPS).
     """
+    sector = info.get("sector", "")
+    if sector in _FINANCIAL_SECTORS:
+        data["cash_per_share"] = None
+        data["debt_per_share"] = None
+        data["capital_lease_per_share"] = None
+        data["net_cash_per_share"] = None
+        return
+
     shares = info.get("sharesOutstanding")
     total_cash = info.get("totalCash")
     total_debt = info.get("totalDebt")

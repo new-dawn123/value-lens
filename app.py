@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.data_fetcher import fetch_stock_data
-from src.gates import check_gates
+from src.gates import check_gates, check_post_valuation_gates
 from src.scorer import apply_price_cap, score_stock
 from src.valuator import (
     calculate_valuation,
@@ -134,6 +134,13 @@ if analyze and ticker:
         disregard_hist_premium=disregard_hist_premium,
         uncap_hist_premium=uncap_hist_premium,
     )
+    post_passed, post_messages = check_post_valuation_gates(valuation)
+    if not post_passed:
+        st.error(f"**{ticker} — {data.get('name', 'Unknown')}**")
+        for msg in post_messages:
+            st.error(msg)
+        st.stop()
+
     scores = apply_price_cap(scores, data, valuation)
     pe_series = compute_historical_pe_series(data)
     fwd_pe_series = compute_historical_forward_pe_series(data)
