@@ -40,7 +40,7 @@ Both entry points (`app.py`, `analyze.py`) follow the same pipeline through five
 | `data_fetcher.py` | Fetches from yfinance (primary) + scrapes finviz.com (growth metrics fallback). Handles FX conversion for ADRs. Retry with exponential backoff for finviz. |
 | `gates.py` | Hard gates (block scoring: EPS <= 0, no growth estimate) and soft gates (warnings: FX conversion, currency mismatch, penny stock). |
 | `scorer.py` | Scores 0-100 from three weighted components: PEG (70%), EPS Revisions (20%), Earnings Surprises (10%). Contains the growth dampening function and `_fair_pe()` compounding model. |
-| `valuator.py` | Fair Value = PEG fair price x historical premium. Entry price from beta-scaled growth scenario. Exit price from historical P/E stretch. |
+| `valuator.py` | Fair Price = PEG fair price x historical premium. Entry price from beta-scaled growth scenario. Exit price from historical P/E stretch. |
 | `formatter.py` | Rich terminal output for CLI. Not used by Streamlit (app.py renders its own UI with Plotly charts). |
 
 **Key constants** in `scorer.py`: `BASE_PE = 12.0` (zero-growth P/E anchor), `_GROWTH_DAMPEN_THRESHOLD = 15.0` (no dampening up to 15%), `_GROWTH_DAMPEN_K = 30.0` (compression factor for excess above threshold). Historical premium in `valuator.py` clamped to ±20%.

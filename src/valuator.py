@@ -20,7 +20,7 @@ def calculate_valuation(
     """Calculate fair value, entry price, and exit price.
 
     Single-flow approach:
-        fair_value = PEG_fair_price × historical_premium
+        fair_price = PEG_fair_value × historical_premium
 
     1. PEG fair price: BASE_PE × (1 + dampened_growth/100)^5 × EPS
     2. Historical premium: median_actual_PE / model_fair_PE(raw_historical_growth)
@@ -45,7 +45,7 @@ def calculate_valuation(
     hist_pes = _get_historical_pes(data)
 
     # Step 1: PEG-implied fair value (core model)
-    peg_result = _peg_implied_fair_value(eps, growth_for_peg)
+    peg_result = _peg_implied_fair_price(eps, growth_for_peg)
 
     # Step 2: Historical premium/discount multiplier
     hist_premium = _compute_historical_premium(data, hist_pes, uncap=uncap_hist_premium)
@@ -53,17 +53,17 @@ def calculate_valuation(
     # Effective multiplier (1.0 when disregarded)
     eff_premium = 1.0 if disregard_hist_premium else hist_premium["premium"]
 
-    # Combine: fair_value = peg_price × premium
-    fair_value = peg_result["fair_price"]
-    if fair_value is not None:
-        fair_value = fair_value * eff_premium
+    # Combine: fair_price = peg_price × premium
+    fair_price = peg_result["fair_value"]
+    if fair_price is not None:
+        fair_price = fair_price * eff_premium
 
     # Entry: beta-scaled growth scenario
     entry_price = None
     margin_of_safety = 0.0
-    if fair_value is not None and growth_for_peg is not None:
+    if fair_price is not None and growth_for_peg is not None:
         entry_price, margin_of_safety = _calculate_entry(
-            fair_value, growth_for_peg, eps, beta,
+            fair_price, growth_for_peg, eps, beta,
             eff_premium,
         )
 
@@ -76,22 +76,22 @@ def calculate_valuation(
             entry_price, hist_pes,
         )
 
-    if fair_value is not None:
-        fair_value = round(fair_value, 2)
+    if fair_price is not None:
+        fair_price = round(fair_price, 2)
 
     # Net cash/debt adjustment: shift from earnings-based to equity value
     # Applied last, after all earnings-based calculations (premium, beta, stretch)
     net_cash = data.get("net_cash_per_share")
     if net_cash is not None:
-        if fair_value is not None:
-            fair_value = round(fair_value + net_cash, 2)
+        if fair_price is not None:
+            fair_price = round(fair_price + net_cash, 2)
         if entry_price is not None:
             entry_price = round(entry_price + net_cash, 2)
         if exit_price is not None:
             exit_price = round(exit_price + net_cash, 2)
 
     return {
-        "fair_value": fair_value,
+        "fair_price": fair_price,
         "entry_price": entry_price,
         "exit_price": exit_price,
         "margin_of_safety": margin_of_safety,
@@ -257,22 +257,22 @@ def compute_historical_forward_pe_series(data: dict) -> list[dict]:
     return series
 
 
-def _peg_implied_fair_value(eps: float, growth: float) -> dict:
+def _peg_implied_fair_price(eps: float, growth: float) -> dict:
     """5-year compounding fair value: Fair P/E = BASE_PE * (1 + g/100)^5.
 
     Pay today's no-growth multiple (12x) for the earnings the company
     will have in 5 years. Works for negative, zero, and positive growth.
     """
     if not eps or eps <= 0 or growth is None:
-        return {"fair_pe": None, "fair_price": None}
+        return {"fair_pe": None, "fair_value": None}
 
     fair = _fair_pe(growth)
     if fair <= 0:
-        return {"fair_pe": None, "fair_price": None}
+        return {"fair_pe": None, "fair_value": None}
 
-    fair_price = round(fair * eps, 2)
+    fair_value = round(fair * eps, 2)
 
-    return {"fair_pe": round(fair, 2), "fair_price": fair_price}
+    return {"fair_pe": round(fair, 2), "fair_value": fair_value}
 
 
 def _compute_historical_premium(
@@ -334,12 +334,15 @@ def _compute_historical_premium(
         }
 
     # Premium: how much more/less the market paid vs model expectation
-    premium = median_pe / model_pe
+    raw_premium = median_pe / model_pe
     if not uncap:
-        premium = max(0.80, min(1.20, premium))  # Clamp ±20%
+        premium = max(0.80, min(1.20, raw_premium))  # Clamp ±20%
+    else:
+        premium = raw_premium
 
     return {
         "premium": round(premium, 2),
+        "raw_premium": round(raw_premium, 2),
         "median_pe": round(median_pe, 2),
         "model_pe": round(model_pe, 2),
         "historical_growth": round(historical_growth, 2),
@@ -404,7 +407,7 @@ def _get_historical_pes(data: dict) -> list[float]:
 
 
 def _calculate_entry(
-    fair_value: float,
+    fair_price: float,
     growth_for_peg: float,
     eps: float,
     beta: float,
@@ -430,16 +433,16 @@ def _calculate_entry(
     else:
         g_entry = growth_for_peg * (1 + shock)
 
-    peg_entry = _peg_implied_fair_value(eps, g_entry)
+    peg_entry = _peg_implied_fair_price(eps, g_entry)
 
-    if peg_entry["fair_price"]:
-        entry_raw = peg_entry["fair_price"] * premium
+    if peg_entry["fair_value"]:
+        entry_raw = peg_entry["fair_value"] * premium
     else:
-        entry_raw = fair_value * 0.95
+        entry_raw = fair_price * 0.95
 
-    entry_discount = (fair_value - entry_raw) / fair_value
+    entry_discount = (fair_price - entry_raw) / fair_price
     entry_discount = max(0.0, min(0.10, entry_discount))
-    entry_price = round(fair_value * (1 - entry_discount), 2)
+    entry_price = round(fair_price * (1 - entry_discount), 2)
 
     return entry_price, round(entry_discount, 4)
 

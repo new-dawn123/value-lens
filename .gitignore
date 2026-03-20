@@ -32,3 +32,4 @@ launcher-gui.bat
 launcher-batch.bat
 
 *.csv
+!sp500_valuation.csv

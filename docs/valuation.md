@@ -5,7 +5,7 @@ The fair value estimate uses a single-flow approach: a model fair price adjusted
 ## Table of Contents
 
 - [Valuation Flow](#valuation-flow)
-- [Step 1: Fair Price (Compounding Model)](#step-1-fair-price-compounding-model)
+- [Step 1: Fair Value (Compounding Model)](#step-1-fair-price-compounding-model)
 - [Step 2: Historical Premium](#step-2-historical-premium)
 - [Step 3: Net Cash Adjustment](#step-3-net-cash-adjustment)
 - [Entry Price (Margin of Safety)](#entry-price-margin-of-safety)
@@ -17,12 +17,12 @@ The fair value estimate uses a single-flow approach: a model fair price adjusted
 ## Valuation Flow
 
 ```
-fair_value = (Fair Price x Historical Premium) + Net Cash Adjustment
+fair_price = (Fair Value x Historical Premium) + Net Cash Adjustment
 ```
 
 | Step | Component | Range | Default |
 |------|-----------|-------|---------|
-| 1 | Fair Price | model-derived | Required (None = no valuation) |
+| 1 | Fair Value | model-derived | Required (None = no valuation) |
 | 2 | Historical Premium | 0.80x - 1.20x | 1.0 (neutral when data insufficient) |
 | 3 | Net Cash Adjustment | unclamped | 0 (when balance sheet data unavailable) |
 
@@ -30,7 +30,7 @@ Entry and exit prices are derived from the final fair value. The net cash adjust
 
 ---
 
-## Step 1: Fair Price (Compounding Model)
+## Step 1: Fair Value (Compounding Model)
 
 Derives fair price from the 5-year compounding model: pay today's no-growth P/E for the earnings the company will have in 5 years.
 
@@ -38,7 +38,7 @@ Derives fair price from the 5-year compounding model: pay today's no-growth P/E 
 
 ```
 Fair P/E = BASE_PE x (1 + effective_growth / 100)^5
-Fair Price = Fair P/E x EPS
+Fair Value = Fair P/E x EPS
 ```
 
 Where:
@@ -48,7 +48,7 @@ Where:
 
 ### Examples
 
-| EPS | Growth (raw) | Growth (dampened) | Fair P/E | Fair Price |
+| EPS | Growth (raw) | Growth (dampened) | Fair P/E | Fair Value |
 |-----|-------------|-------------------|----------|------------|
 | $8.00 | 12% | 11.0% | 20.2 | $161.50 |
 | $4.00 | 20% | 17.9% | 28.1 | $112.30 |
@@ -113,7 +113,7 @@ Shifts the earnings-based fair price from an enterprise-value-like estimate to a
 
 ```
 net_cash_per_share = cash_per_share - debt_per_share - capital_lease_per_share
-fair_value         = (Fair Price x Historical Premium) + net_cash_per_share
+fair_price         = (Fair Value x Historical Premium) + net_cash_per_share
 entry_price        = entry_price + net_cash_per_share
 exit_price         = exit_price + net_cash_per_share
 ```
