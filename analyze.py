@@ -23,7 +23,7 @@ def main():
     )
     parser.add_argument(
         "--no-hist-premium", action="store_true",
-        help="Disregard Historical Premium (still shown, not applied to Fair Value)"
+        help="Disregard Historical Premium (still shown, not applied to Fair Price)"
     )
     parser.add_argument(
         "--uncap-hist-premium", action="store_true",

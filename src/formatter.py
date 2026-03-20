@@ -121,10 +121,10 @@ def _print_detailed(
     peg_m = valuation["peg_method"]
     hist_p = valuation["historical_premium"]
 
-    if peg_m["fair_price"]:
+    if peg_m["fair_value"]:
         val_table.add_row(
-            "Fair Price",
-            f"${peg_m['fair_price']:,.2f}  (fair P/E={peg_m['fair_pe']})"
+            "Fair Value",
+            f"${peg_m['fair_value']:,.2f}  (fair P/E={peg_m['fair_pe']})"
         )
     if hist_p["median_pe"]:
         premium_str = f"{hist_p['premium']:.2f}x"
@@ -150,10 +150,10 @@ def _print_detailed(
             f"\n              debt = ${debt_ps:,.2f}"
             f"\n              leases = ${cap_ps:,.2f})"
         )
-    if valuation["fair_value"]:
+    if valuation["fair_price"]:
         val_table.add_row(
-            "Fair Value",
-            f"[bold]${valuation['fair_value']:,.2f}[/bold]"
+            "Fair Price",
+            f"[bold]${valuation['fair_price']:,.2f}[/bold]"
         )
     margin_pct = round(valuation["margin_of_safety"] * 100)
     exit_pct = round(valuation.get("exit_premium", 0) * 100)

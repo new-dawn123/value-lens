@@ -253,7 +253,7 @@ def _score_label(score: int) -> str:
     if score >= 70:
         return "Attractive"
     if score >= 50:
-        return "Hold / Fair Value"
+        return "Hold"
     if score >= 20:
         return "Unattractive"
     return "Avoid"
