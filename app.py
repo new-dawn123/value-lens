@@ -182,17 +182,6 @@ with tab_analyzer:
         with col_button:
             analyze = st.form_submit_button("Analyze", type="primary", width="stretch")
 
-    # Auto-analyze: deep-link first visit, or re-run when options change
-    _auto_done = st.session_state.get("_auto_analyzed_ticker")
-    if _qp_ticker and not analyze:
-        _is_deep_link = _auto_done != _qp_ticker
-        _has_result = "result" in st.session_state
-        if _is_deep_link or _has_result:
-            analyze = True
-            ticker = _qp_ticker
-        if _is_deep_link:
-            st.session_state["_auto_analyzed_ticker"] = _qp_ticker
-
     with st.expander("Advanced Options"):
         # Pull actual values from last result for defaults
         _prev = st.session_state.get("result", {}).get("data", {})
@@ -235,6 +224,21 @@ with tab_analyzer:
             "Uncap Historical Premium",
             help="Remove the \u00b120% clamp (0.80\u20131.20) on the historical premium.",
         )
+
+    # Auto-analyze: deep-link first visit, or re-run when options change
+    _auto_done = st.session_state.get("_auto_analyzed_ticker")
+    _opts_fingerprint = (use_custom_eps, custom_eps, use_custom_growth,
+                         custom_growth, disregard_hist_premium, uncap_hist_premium)
+    _prev_fingerprint = st.session_state.get("_opts_fingerprint")
+    if _qp_ticker and not analyze:
+        _is_deep_link = _auto_done != _qp_ticker
+        _opts_changed = ("result" in st.session_state
+                         and _opts_fingerprint != _prev_fingerprint)
+        if _is_deep_link or _opts_changed:
+            analyze = True
+            ticker = _qp_ticker
+        if _is_deep_link:
+            st.session_state["_auto_analyzed_ticker"] = _qp_ticker
 
     # --- Orchestration ---
     # NOTE: Do not use st.stop() — it kills the entire script and
@@ -303,6 +307,7 @@ with tab_analyzer:
                 "gate_messages": gate_messages,
                 "disregard_hist_premium": disregard_hist_premium,
             }
+            st.session_state["_opts_fingerprint"] = _opts_fingerprint
 
     # --- Rendering (from session state) ---
     if "result" in st.session_state:
