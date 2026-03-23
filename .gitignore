@@ -32,7 +32,7 @@ launcher-gui.bat
 launcher-batch.bat
 
 *.csv
-!sp500_valuation.csv
+!top500_valuation.csv
 
 # Scripts (local only)
 src/due_diligence.py

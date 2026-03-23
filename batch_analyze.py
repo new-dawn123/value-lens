@@ -1,9 +1,10 @@
-"""Batch-analyze all S&P 500 stocks using the ValueLens pipeline.
+"""Batch-analyze the top 500 global stocks using the ValueLens pipeline.
 
-Fetches the S&P 500 constituent list from the finviz screener, then runs
-each ticker through the full scoring/valuation pipeline.  Results are saved
-incrementally to a CSV so the run can be resumed after interruption or
-rate-limit stops.
+Fetches the largest global companies from the finviz screener (sorted by
+market cap), then runs each ticker through the full scoring/valuation
+pipeline.  We fetch extra tickers (~700) to guarantee exactly 500 results
+with OK status after gate filtering.  Results are saved incrementally to a
+CSV so the run can be resumed after interruption or rate-limit stops.
 """
 
 from __future__ import annotations
@@ -40,8 +41,10 @@ _FINVIZ_HEADERS = {
 _FINVIZ_TIMEOUT = 20
 
 _SCREENER_URL = "https://finviz.com/screener.ashx"
-_SCREENER_PARAMS = {"v": "111", "f": "idx_sp500", "o": "-marketcap"}
+_SCREENER_PARAMS = {"v": "111", "o": "-marketcap"}
 _CONSECUTIVE_FAIL_LIMIT = 5
+_FETCH_LIMIT = 700     # fetch extra to guarantee 500 OK results
+_TARGET_OK = 500       # stop writing after this many OK rows
 
 CSV_COLUMNS = [
     "#",
@@ -58,7 +61,7 @@ CSV_COLUMNS = [
 
 
 # ---------------------------------------------------------------------------
-# S&P 500 list retrieval via finviz screener
+# Global ticker list retrieval via finviz screener
 # ---------------------------------------------------------------------------
 
 def _parse_market_cap(text: str) -> float:
@@ -98,15 +101,17 @@ def _fetch_screener_page(start: int = 1) -> str | None:
     return None
 
 
-def fetch_sp500_tickers() -> list[dict]:
-    """Scrape the finviz screener for all S&P 500 tickers sorted by market cap.
+def fetch_top_tickers(limit: int = _FETCH_LIMIT) -> list[dict]:
+    """Scrape the finviz screener for the top global tickers by market cap.
 
     Returns a list of dicts with keys: ticker, name, sector, market_cap.
+    Fetches up to *limit* tickers (default ~700) so that after gate
+    filtering we can still fill 500 OK rows.
     """
     tickers: list[dict] = []
     start = 1
 
-    while True:
+    while len(tickers) < limit:
         html = _fetch_screener_page(start)
         if html is None:
             break
@@ -161,7 +166,7 @@ def fetch_sp500_tickers() -> list[dict]:
 
     # Sort by market cap descending (should already be sorted, but ensure)
     tickers.sort(key=lambda x: x["market_cap"], reverse=True)
-    return tickers
+    return tickers[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +221,11 @@ def _count_csv_rows(path: str) -> int:
     try:
         with open(path, "r", newline="", encoding="utf-8") as f:
             for line in f:
-                if not line.startswith("#") and line.strip():
+                # Skip comment lines ("# Last run: ...") but not the header
+                # row which starts with "#," (the column name is "#").
+                if line.startswith("# "):
+                    continue
+                if line.strip():
                     count += 1
         return max(count - 1, 0)  # subtract header row
     except Exception:
@@ -232,11 +241,21 @@ def _format_market_cap(value) -> str:
     except (ValueError, TypeError):
         return ""
     if v >= 1e12:
-        return f"{v / 1e12:.2f}T"
+        scaled = v / 1e12
+        return f"{scaled:.1f}T" if scaled >= 10 else f"{scaled:.2f}T"
     if v >= 1e9:
-        return f"{v / 1e9:.2f}B"
+        scaled = v / 1e9
+        # After rounding, check if it should be promoted to T
+        rounded = round(scaled, 1 if scaled >= 10 else 2)
+        if rounded >= 1000:
+            return f"{v / 1e12:.2f}T"
+        return f"{scaled:.1f}B" if scaled >= 10 else f"{scaled:.2f}B"
     if v >= 1e6:
-        return f"{v / 1e6:.2f}M"
+        scaled = v / 1e6
+        rounded = round(scaled, 1 if scaled >= 10 else 2)
+        if rounded >= 1000:
+            return f"{v / 1e9:.2f}B"
+        return f"{scaled:.1f}M" if scaled >= 10 else f"{scaled:.2f}M"
     return f"{v:.0f}"
 
 
@@ -244,12 +263,15 @@ def _format_market_cap(value) -> str:
 # Single-ticker analysis
 # ---------------------------------------------------------------------------
 
-def analyze_ticker(ticker: str) -> list | None:
+def analyze_ticker(ticker: str, screener_market_cap: float | None = None) -> list | None:
     """Run the full ValueLens pipeline on a single ticker.
 
     Returns a list matching CSV_COLUMNS (without the '#' position, which is
     filled in by the main loop), or None if the ticker should be skipped
     (gate failure, negative prices, etc.).
+
+    If *screener_market_cap* is provided (from the finviz screener), it is
+    used for the CSV market-cap column so ordering stays consistent.
     """
     data = fetch_stock_data(ticker)
 
@@ -281,7 +303,7 @@ def analyze_ticker(ticker: str) -> list | None:
     return [
         ticker,
         data.get("name", ""),
-        _format_market_cap(data.get("market_cap")),
+        _format_market_cap(screener_market_cap or data.get("market_cap")),
         current_price or "",
         round(fair_value, 2) if fair_value else "",
         pct_vs_fv,
@@ -295,7 +317,9 @@ def analyze_ticker(ticker: str) -> list | None:
 # Main batch loop
 # ---------------------------------------------------------------------------
 
-def _process_ticker(ticker: str, order_key: int) -> tuple[int, str, list | None, str]:
+def _process_ticker(
+    ticker: str, order_key: int, screener_market_cap: float | None = None,
+) -> tuple[int, str, list | None, str]:
     """Worker function: analyze a single ticker with retries.
 
     Returns (order_key, ticker, row_or_None, status_str).
@@ -303,7 +327,7 @@ def _process_ticker(ticker: str, order_key: int) -> tuple[int, str, list | None,
     """
     for attempt in range(_MAX_RETRIES):
         try:
-            row = analyze_ticker(ticker)
+            row = analyze_ticker(ticker, screener_market_cap=screener_market_cap)
             if row is None:
                 return order_key, ticker, None, "SKIPPED"
             return order_key, ticker, row, "OK"
@@ -316,11 +340,11 @@ def _process_ticker(ticker: str, order_key: int) -> tuple[int, str, list | None,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Batch-analyze S&P 500 stocks with ValueLens"
+        description="Batch-analyze top global stocks with ValueLens"
     )
     parser.add_argument(
         "--limit", type=int, default=None,
-        help="Process only the top N tickers by market cap (default: all)"
+        help="Target number of OK results (default: 500)"
     )
     parser.add_argument(
         "--workers", type=int, default=4,
@@ -331,33 +355,37 @@ def main():
         help="Seconds to wait between submitting tickers (default: 0.5)"
     )
     parser.add_argument(
-        "--output", type=str, default="sp500_valuation.csv",
-        help="Output CSV file path (default: sp500_valuation.csv)"
+        "--output", type=str, default="top500_valuation.csv",
+        help="Output CSV file path (default: top500_valuation.csv)"
     )
     args = parser.parse_args()
 
-    # --- Fetch S&P 500 list ---
-    print("Fetching S&P 500 constituent list from finviz...")
-    sp500 = fetch_sp500_tickers()
-    if not sp500:
-        print("Error: could not retrieve S&P 500 list from finviz.")
-        sys.exit(1)
-    print(f"  Found {len(sp500)} tickers.")
+    target_ok = args.limit or _TARGET_OK
+    # Fetch extra tickers so we can hit the target after gate filtering
+    fetch_count = int(target_ok * _FETCH_LIMIT / _TARGET_OK)
 
-    # Apply limit
-    if args.limit:
-        sp500 = sp500[: args.limit]
-        print(f"  Limited to top {args.limit} by market cap.")
+    # --- Fetch global ticker list ---
+    print(f"Fetching top {fetch_count} global companies from finviz...")
+    tickers_list = fetch_top_tickers(limit=fetch_count)
+    if not tickers_list:
+        print("Error: could not retrieve ticker list from finviz.")
+        sys.exit(1)
+    print(f"  Found {len(tickers_list)} tickers.")
 
     # --- Resume support ---
     already_done = _read_existing_csv(args.output)
     if already_done:
-        remaining = [t for t in sp500 if t["ticker"] not in already_done]
+        remaining = [t for t in tickers_list if t["ticker"] not in already_done]
         print(f"  Resuming: {len(already_done)} already processed, "
               f"{len(remaining)} remaining.")
     else:
-        remaining = sp500
+        remaining = tickers_list
         _write_csv_header(args.output)
+
+    csv_row_num_start = _count_csv_rows(args.output)
+    if csv_row_num_start >= target_ok:
+        print(f"Already have {csv_row_num_start} OK results (target: {target_ok}). Nothing to do.")
+        sys.exit(0)
 
     if not remaining:
         print("All tickers already processed. Nothing to do.")
@@ -366,7 +394,7 @@ def main():
     # Ordered list of indices for flush tracking (one per remaining ticker)
     remaining_keys = list(range(len(remaining)))
 
-    total = len(sp500)
+    total = len(tickers_list)
     done_count = len(already_done)
     consecutive_failures = 0
     print_lock = threading.Lock()
@@ -378,7 +406,10 @@ def main():
     csv_row_num = _count_csv_rows(args.output)  # rows already written
 
     def _flush_pending():
-        """Write all consecutive ready results to CSV in order, assigning #."""
+        """Write all consecutive ready results to CSV in order, assigning #.
+
+        Returns True if we have reached the target number of OK results.
+        """
         nonlocal next_write_idx, csv_row_num
         while next_write_idx < len(remaining_keys):
             key = remaining_keys[next_write_idx]
@@ -389,55 +420,105 @@ def main():
                 csv_row_num += 1
                 row.insert(0, csv_row_num)
                 _append_csv_row(args.output, row)
+                if csv_row_num >= target_ok:
+                    return True
             next_write_idx += 1
+        return False
 
-    print(f"  Processing {len(remaining)} tickers with {args.workers} workers...\n")
+    print(f"  Processing {len(remaining)} tickers with {args.workers} workers "
+          f"(target: {target_ok} OK results)...\n")
 
     # --- Parallel process loop ---
+    # Submit futures in a background thread so we can start processing
+    # results immediately instead of blocking on the full submission loop.
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = {}
-        for idx, entry in enumerate(remaining):
-            if stop_event.is_set():
-                break
-            ticker = entry["ticker"]
-            future = executor.submit(_process_ticker, ticker, idx)
-            futures[future] = ticker
-            time.sleep(args.delay)  # stagger submissions to avoid burst
+        futures: dict = {}
+        futures_lock = threading.Lock()
 
-        for future in as_completed(futures):
-            if stop_event.is_set():
-                break
+        def _submit_all():
+            for idx, entry in enumerate(remaining):
+                if stop_event.is_set():
+                    break
+                ticker = entry["ticker"]
+                future = executor.submit(
+                    _process_ticker, ticker, idx, entry.get("market_cap"),
+                )
+                with futures_lock:
+                    futures[future] = ticker
+                time.sleep(args.delay)  # stagger submissions to avoid burst
 
-            order_key, ticker, row, status = future.result()
-            done_count += 1
+        handled: set = set()
+        submitter = threading.Thread(target=_submit_all, daemon=True)
+        submitter.start()
 
-            with print_lock:
-                print(f"[{done_count}/{total}] {ticker}: {status}")
+        # Process results as they complete, while submission continues
+        while True:
+            submitter_alive = submitter.is_alive()
 
-            # Buffer result and flush any consecutive ready rows
-            pending[order_key] = row
-            _flush_pending()
+            # Grab a snapshot of current futures
+            with futures_lock:
+                snapshot = dict(futures)
 
-            if status.startswith("FAILED"):
-                consecutive_failures += 1
-                if consecutive_failures >= _CONSECUTIVE_FAIL_LIMIT:
+            # Find completed futures not yet handled
+            done_futures = [f for f in snapshot if f.done() and f not in handled]
+
+            if not done_futures and not submitter_alive:
+                # Check if all submitted futures have been handled
+                with futures_lock:
+                    snapshot = dict(futures)
+                unhandled = [f for f in snapshot if f not in handled]
+                if not unhandled:
+                    break
+
+            if not done_futures:
+                time.sleep(0.1)
+                continue
+
+            for future in done_futures:
+                if stop_event.is_set():
+                    break
+
+                handled.add(future)
+                order_key, ticker, row, status = future.result()
+                done_count += 1
+
+                with print_lock:
+                    print(f"[{done_count}/{total}] {ticker}: {status}  "
+                          f"({csv_row_num}/{target_ok} OK)")
+
+                # Buffer result and flush any consecutive ready rows
+                pending[order_key] = row
+                reached_target = _flush_pending()
+
+                if reached_target:
                     with print_lock:
-                        print(f"\n{_CONSECUTIVE_FAIL_LIMIT} consecutive failures — "
-                              f"likely rate-limited. Stopping.")
-                        print(f"Progress saved to {args.output}. "
-                              f"Re-run to resume from where you left off.")
+                        print(f"\nReached target of {target_ok} OK results. Stopping.")
                     stop_event.set()
-                    # Cancel pending futures
-                    for f in futures:
-                        f.cancel()
-                    sys.exit(2)
-            else:
-                consecutive_failures = 0
+                    break
 
-    # Flush any remaining buffered results
+                if status.startswith("FAILED"):
+                    consecutive_failures += 1
+                    if consecutive_failures >= _CONSECUTIVE_FAIL_LIMIT:
+                        with print_lock:
+                            print(f"\n{_CONSECUTIVE_FAIL_LIMIT} consecutive failures — "
+                                  f"likely rate-limited. Stopping.")
+                            print(f"Progress saved to {args.output}. "
+                                  f"Re-run to resume from where you left off.")
+                        stop_event.set()
+                        submitter.join(timeout=2)
+                        sys.exit(2)
+                else:
+                    consecutive_failures = 0
+
+            if stop_event.is_set():
+                break
+
+        submitter.join(timeout=2)
+
+    # Flush any remaining buffered results (won't exceed target)
     _flush_pending()
 
-    print(f"\nDone! Results saved to {args.output}")
+    print(f"\nDone! {csv_row_num} results saved to {args.output}")
 
 
 if __name__ == "__main__":

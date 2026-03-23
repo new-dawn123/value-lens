@@ -19,7 +19,7 @@ from src.valuator import (
 
 _PROJECT_DIR = Path(__file__).parent
 _LOGO_PATH = _PROJECT_DIR / "assets" / "logo.png"
-_CSV_PATH = _PROJECT_DIR / "sp500_valuation.csv"
+_CSV_PATH = _PROJECT_DIR / "top500_valuation.csv"
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -672,12 +672,13 @@ with tab_analyzer:
 
 # ===== Batch Analysis tab =====
 with tab_batch:
-    st.subheader("S&P 500 Batch Analysis")
+    st.subheader("Top 500 Global Stocks — Batch Analysis")
+    st.caption("Only stocks passing all valuation gates are shown (positive EPS, available growth estimates).")
 
     if _CSV_PATH.exists():
         run_date = _read_batch_run_date()
         if run_date:
-            st.success(f"Last run: {run_date}")
+            st.caption(f"Last run: {run_date}")
 
     # --- Results table ---
     _batch_df = _load_batch_csv()
@@ -705,7 +706,7 @@ with tab_batch:
         if "#" in _batch_df.columns:
             _batch_df = _batch_df.set_index("#")
 
-        st.caption(f"{len(_batch_df)} stocks")
+
 
         column_config = {
             "Ticker": st.column_config.LinkColumn(
