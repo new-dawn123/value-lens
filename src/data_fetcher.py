@@ -155,6 +155,9 @@ def fetch_stock_data(ticker: str) -> dict:
     # Annual EPS history for time-accurate historical P/E
     data["annual_eps_history"] = _get_annual_eps_history(stock)
 
+    # Annual revenue history for revenue chart
+    data["annual_revenue_history"] = _get_annual_revenue_history(stock)
+
     # Quarterly EPS history for historical forward P/E
     data["quarterly_eps_history"] = _get_quarterly_eps_history(stock)
 
@@ -174,6 +177,7 @@ def fetch_stock_data(ticker: str) -> dict:
         if fx_rate is not None:
             _convert_eps_history(data["annual_eps_history"], fx_rate)
             _convert_eps_history(data["quarterly_eps_history"], fx_rate)
+            _convert_revenue_history(data["annual_revenue_history"], fx_rate)
             # P/S ratio: Yahoo computes MarketCap / Revenue with mixed currencies
             # for ADRs/foreign listings. Divide by fx_rate to normalize.
             if data["ps_ratio"] is not None:
@@ -461,9 +465,26 @@ def _get_annual_eps_history(stock: yf.Ticker) -> list[dict] | None:
             eps_row = inc.loc["Diluted EPS"]
             records = []
             for date, eps_val in eps_row.items():
-                if eps_val is not None and pd.notna(eps_val) and float(eps_val) > 0:
+                if eps_val is not None and pd.notna(eps_val):
                     records.append({"date": date.to_pydatetime(), "eps": float(eps_val)})
             # Sort oldest first
+            records.sort(key=lambda r: r["date"])
+            return records if records else None
+    except Exception:
+        pass
+    return None
+
+
+def _get_annual_revenue_history(stock: yf.Ticker) -> list[dict] | None:
+    """Get annual Total Revenue from income statement."""
+    try:
+        inc = stock.income_stmt
+        if inc is not None and not inc.empty and "Total Revenue" in inc.index:
+            rev_row = inc.loc["Total Revenue"]
+            records = []
+            for date, val in rev_row.items():
+                if val is not None and pd.notna(val):
+                    records.append({"date": date.to_pydatetime(), "revenue": float(val)})
             records.sort(key=lambda r: r["date"])
             return records if records else None
     except Exception:
@@ -514,6 +535,14 @@ def _convert_eps_history(eps_history: list[dict] | None, fx_rate: float) -> None
         record["eps"] = record["eps"] * fx_rate
 
 
+def _convert_revenue_history(rev_history: list[dict] | None, fx_rate: float) -> None:
+    """Convert revenue values in-place by multiplying with fx_rate."""
+    if not rev_history:
+        return
+    for record in rev_history:
+        record["revenue"] = record["revenue"] * fx_rate
+
+
 def _detect_currency_mismatch(data: dict) -> bool:
     """Detect if annual EPS is still in a different currency than trailing EPS.
 
@@ -524,7 +553,10 @@ def _detect_currency_mismatch(data: dict) -> bool:
     trailing_eps = data.get("trailing_eps")
     if not annual_eps or not trailing_eps or trailing_eps <= 0:
         return False
-    ratio = annual_eps[-1]["eps"] / trailing_eps
+    latest_eps = annual_eps[-1]["eps"]
+    if latest_eps <= 0:
+        return False
+    ratio = latest_eps / trailing_eps
     return ratio > 3.0 or ratio < 0.33
 
 

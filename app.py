@@ -559,6 +559,106 @@ with tab_analyzer:
                 else:
                     st.info("Historical Forward P/E chart unavailable \u2014 insufficient earnings data.")
 
+            # --- Section 4b: Annual Revenue & EPS histograms (side by side) ---
+            rev_col, eps_col = st.columns(2)
+
+            with rev_col:
+                rev_hist = data.get("annual_revenue_history")
+                if rev_hist and len(rev_hist) >= 2:
+                    rev_years = [r["date"].strftime("%FY%y") if hasattr(r["date"], "strftime") else str(r["date"]) for r in rev_hist]
+                    rev_labels = [r["date"].strftime("FY%y") for r in rev_hist]
+                    rev_values = [r["revenue"] for r in rev_hist]
+                    # YOY growth
+                    rev_yoy = [None] + [
+                        ((rev_values[i] - rev_values[i - 1]) / abs(rev_values[i - 1])) * 100
+                        if rev_values[i - 1] != 0 else None
+                        for i in range(1, len(rev_values))
+                    ]
+
+                    from plotly.subplots import make_subplots
+                    rev_billions = [v / 1e9 for v in rev_values]
+                    fig_rev = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_rev.add_trace(go.Bar(
+                        x=rev_labels, y=rev_billions,
+                        name="Revenue", marker_color="#00897B",
+                        hovertemplate="%{x}: $%{y:.1f}B<extra></extra>",
+                    ), secondary_y=False)
+                    # YOY growth line (skip first None)
+                    growth_labels = [rev_labels[i] for i in range(len(rev_yoy)) if rev_yoy[i] is not None]
+                    growth_values = [round(v, 1) for v in rev_yoy if v is not None]
+                    fig_rev.add_trace(go.Scatter(
+                        x=growth_labels, y=growth_values, mode="lines+markers",
+                        name="YOY Growth", line=dict(color="#FFA500", width=2),
+                        marker=dict(size=4),
+                        hovertemplate="%{x}: %{y:+.1f}%<extra></extra>",
+                    ), secondary_y=True)
+                    # Add percentage labels on growth points
+                    for lbl, val in zip(growth_labels, growth_values):
+                        fig_rev.add_annotation(
+                            x=lbl, y=val, yref="y2",
+                            text=f"{val:+.1f}%", showarrow=False,
+                            yshift=16, font=dict(size=11, color="#FFA500"),
+                        )
+                    rev_max = max(rev_billions)
+                    fig_rev.update_layout(
+                        title=f"{ticker} — Annual Revenue",
+                        height=380,
+                        showlegend=False,
+                        yaxis=dict(title="Revenue ($B)", showgrid=False, range=[0, rev_max * 1.22]),
+                        yaxis2=dict(title="YOY Growth (%)", showgrid=False),
+                    )
+                    st.plotly_chart(fig_rev, width="stretch")
+                else:
+                    st.info("Annual revenue chart unavailable — insufficient data.")
+
+            with eps_col:
+                eps_hist = data.get("annual_eps_history")
+                if eps_hist and len(eps_hist) >= 2:
+                    eps_labels = [r["date"].strftime("FY%y") for r in eps_hist]
+                    eps_values = [r["eps"] for r in eps_hist]
+                    # YOY growth
+                    eps_yoy = [None] + [
+                        ((eps_values[i] - eps_values[i - 1]) / abs(eps_values[i - 1])) * 100
+                        if eps_values[i - 1] != 0 else None
+                        for i in range(1, len(eps_values))
+                    ]
+
+                    from plotly.subplots import make_subplots
+                    fig_eps = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_eps.add_trace(go.Bar(
+                        x=eps_labels, y=eps_values,
+                        name="EPS", marker_color="#1565C0",
+                        hovertemplate="%{x}: $%{y:.2f}<extra></extra>",
+                    ), secondary_y=False)
+                    # YOY growth line
+                    eg_labels = [eps_labels[i] for i in range(len(eps_yoy)) if eps_yoy[i] is not None]
+                    eg_values = [round(v, 1) for v in eps_yoy if v is not None]
+                    fig_eps.add_trace(go.Scatter(
+                        x=eg_labels, y=eg_values, mode="lines+markers",
+                        name="YOY Growth", line=dict(color="#FFA500", width=2),
+                        marker=dict(size=4),
+                        hovertemplate="%{x}: %{y:+.1f}%<extra></extra>",
+                    ), secondary_y=True)
+                    for lbl, val in zip(eg_labels, eg_values):
+                        fig_eps.add_annotation(
+                            x=lbl, y=val, yref="y2",
+                            text=f"{val:+.1f}%", showarrow=False,
+                            yshift=16, font=dict(size=11, color="#FFA500"),
+                        )
+                    eps_max = max(eps_values)
+                    eps_min = min(eps_values)
+                    eps_y_lo = eps_min * 1.22 if eps_min < 0 else 0
+                    fig_eps.update_layout(
+                        title=f"{ticker} — Annual EPS",
+                        height=380,
+                        showlegend=False,
+                        yaxis=dict(title="EPS ($)", showgrid=False, range=[eps_y_lo, eps_max * 1.22]),
+                        yaxis2=dict(title="YOY Growth (%)", showgrid=False),
+                    )
+                    st.plotly_chart(fig_eps, width="stretch")
+                else:
+                    st.info("Annual EPS chart unavailable — insufficient data.")
+
             # --- Section 5: Detailed Metrics (expandable) ---
             with st.expander("Detailed Metrics"):
 
