@@ -580,7 +580,7 @@ with tab_analyzer:
                     fig_rev = make_subplots(specs=[[{"secondary_y": True}]])
                     fig_rev.add_trace(go.Bar(
                         x=rev_labels, y=rev_billions,
-                        name="Revenue", marker_color="#00897B",
+                        name="Revenue", marker_color="#00796B",
                         hovertemplate="%{x}: $%{y:.1f}B<extra></extra>",
                     ), secondary_y=False)
                     # YOY growth line (skip first None)
@@ -597,15 +597,19 @@ with tab_analyzer:
                         fig_rev.add_annotation(
                             x=lbl, y=val, yref="y2",
                             text=f"{val:+.1f}%", showarrow=False,
-                            yshift=16, font=dict(size=11, color="#FFA500"),
+                            yshift=16, font=dict(color="#FFA500"),
                         )
                     rev_max = max(rev_billions)
+                    # Center growth line in the middle of the y2 axis
+                    g_mid = (max(growth_values) + min(growth_values)) / 2
+                    g_half = max((max(growth_values) - min(growth_values)) / 2, abs(g_mid) * 0.5, 5)
                     fig_rev.update_layout(
                         title=f"{ticker} — Annual Revenue",
                         height=380,
                         showlegend=False,
                         yaxis=dict(title="Revenue ($B)", showgrid=False, range=[0, rev_max * 1.22]),
-                        yaxis2=dict(title="YOY Growth (%)", showgrid=False),
+                        yaxis2=dict(title="YOY Growth (%)", showgrid=False,
+                                    range=[g_mid - g_half * 2, g_mid + g_half * 2]),
                     )
                     st.plotly_chart(fig_rev, width="stretch")
                 else:
@@ -643,17 +647,21 @@ with tab_analyzer:
                         fig_eps.add_annotation(
                             x=lbl, y=val, yref="y2",
                             text=f"{val:+.1f}%", showarrow=False,
-                            yshift=16, font=dict(size=11, color="#FFA500"),
+                            yshift=16, font=dict(color="#FFA500"),
                         )
                     eps_max = max(eps_values)
                     eps_min = min(eps_values)
                     eps_y_lo = eps_min * 1.22 if eps_min < 0 else 0
+                    # Center growth line in the middle of the y2 axis
+                    eg_mid = (max(eg_values) + min(eg_values)) / 2
+                    eg_half = max((max(eg_values) - min(eg_values)) / 2, abs(eg_mid) * 0.5, 5)
                     fig_eps.update_layout(
                         title=f"{ticker} — Annual EPS",
                         height=380,
                         showlegend=False,
                         yaxis=dict(title="EPS ($)", showgrid=False, range=[eps_y_lo, eps_max * 1.22]),
-                        yaxis2=dict(title="YOY Growth (%)", showgrid=False),
+                        yaxis2=dict(title="YOY Growth (%)", showgrid=False,
+                                    range=[eg_mid - eg_half * 2, eg_mid + eg_half * 2]),
                     )
                     st.plotly_chart(fig_eps, width="stretch")
                 else:
