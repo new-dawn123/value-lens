@@ -17,6 +17,14 @@ from src.valuator import (
     compute_historical_pe_series,
 )
 
+from datetime import date, timedelta
+
+from src.warrant_pricer import (
+    greeks,
+    implied_volatility,
+    scenario_price,
+)
+
 _PROJECT_DIR = Path(__file__).parent
 _LOGO_PATH = _PROJECT_DIR / "assets" / "logo.png"
 _CSV_PATH = _PROJECT_DIR / "top500_valuation.csv"
@@ -30,6 +38,30 @@ def cached_fetch(ticker: str, cache_version: int = 0) -> dict:
     so the next submit bypasses the stale cache and retries finviz.
     """
     return fetch_stock_data(ticker)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_fx_rate(from_ccy: str, to_ccy: str) -> float | None:
+    """Fetch FX rate via yfinance. Returns rate such that 1 from_ccy = rate to_ccy."""
+    if from_ccy == to_ccy:
+        return 1.0
+    import yfinance as yf
+    pair = f"{from_ccy}{to_ccy}=X"
+    try:
+        hist = yf.Ticker(pair).history(period="1d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+    except Exception:
+        pass
+    # Try inverse
+    pair_inv = f"{to_ccy}{from_ccy}=X"
+    try:
+        hist = yf.Ticker(pair_inv).history(period="1d")
+        if not hist.empty:
+            return 1.0 / float(hist["Close"].iloc[-1])
+    except Exception:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +159,7 @@ def _load_batch_csv() -> pd.DataFrame | None:
 # --- Page config ---
 st.set_page_config(page_title="ValueLens", page_icon=str(_LOGO_PATH), layout="wide")
 
-st.html(
+st.markdown(
     "<style>"
     "section.main > div.block-container,"
     "[data-testid='stMainBlockContainer'],"
@@ -136,28 +168,43 @@ st.html(
     "  padding-right: 15% !important;"
     "  max-width: 100% !important;"
     "}"
-    "</style>"
+    "</style>",
+    unsafe_allow_html=True,
+)
+
+# Select all text on focus for number inputs (must use components.html for JS)
+import streamlit.components.v1 as _components
+_components.html(
+    "<script>"
+    "const doc = window.parent.document;"
+    "doc.addEventListener('focusin', function(e) {"
+    "  if (e.target.tagName === 'INPUT'"
+    "      && (e.target.type === 'number' || e.target.type === 'text')"
+    "      && e.target.closest('[data-testid]')) {"
+    "    setTimeout(function() { e.target.select(); }, 10);"
+    "  }"
+    "});"
+    "</script>",
+    height=0,
 )
 
 _logo_b64 = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
 st.markdown(
     f"<link href='https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap'"
     f" rel='stylesheet'>"
-    f"<div style='display:flex;align-items:center;gap:14px;margin-bottom:4px'>"
+    f"<div style='display:flex;align-items:center;gap:16px;margin-top:-2rem;margin-bottom:4px'>"
     f"<img src='data:image/png;base64,{_logo_b64}'"
-    f" style='width:56px;height:56px;object-fit:contain'>"
-    f"<div>"
-    f"<span style='font-family:Inter,sans-serif;font-size:2.1em;font-weight:600;"
+    f" style='width:52px;height:52px;object-fit:contain'>"
+    f"<span style='font-family:Inter,sans-serif;font-size:2.6em;font-weight:600;"
     f"line-height:1;letter-spacing:-0.02em'>"
     f"<span style='color:#1c6295'>Value</span>"
-    f"<span style='color:#50a375'>Lens</span></span><br>"
-    f"<span style='color:gray;font-size:0.9em'>Stock Fundamentals Analyzer</span>"
-    f"</div></div>",
+    f"<span style='color:#50a375'>Lens</span></span>"
+    f"</div>",
     unsafe_allow_html=True,
 )
 
 # --- Tabs ---
-tab_analyzer, tab_batch = st.tabs(["Analyzer", "Batch Analysis"])
+tab_analyzer, tab_batch, tab_warrant = st.tabs(["Stock Analysis", "Screener", "Warrant Analysis"])
 
 # ===== Analyzer tab =====
 with tab_analyzer:
@@ -242,7 +289,7 @@ with tab_analyzer:
 
     # --- Orchestration ---
     # NOTE: Do not use st.stop() — it kills the entire script and
-    # prevents the Batch Analysis tab from rendering.
+    # prevents the Screener tab from rendering.
     if analyze and ticker:
         ticker = ticker.upper().strip()
         st.query_params["ticker"] = ticker
@@ -778,9 +825,9 @@ with tab_analyzer:
             # Stale or incompatible session state -- clear it silently
             del st.session_state["result"]
 
-# ===== Batch Analysis tab =====
+# ===== Screener tab =====
 with tab_batch:
-    st.subheader("Top 500 Global Stocks — Batch Analysis")
+    st.subheader("Top 500 Global Stocks")
     st.caption("Only stocks passing all valuation gates are shown (positive EPS, available growth estimates).")
 
     if _CSV_PATH.exists():
@@ -851,3 +898,262 @@ with tab_batch:
             hide_index=False,
             height=600,
         )
+
+# ===== Warrant Analysis tab =====
+_CURRENCIES = ["USD", "EUR", "GBP", "CHF", "JPY"]
+
+with tab_warrant:
+    st.subheader("Warrant Analysis")
+
+    with st.form("warrant_form"):
+        w_col1, w_col2, w_col3, w_col4, w_col5 = st.columns([2, 1, 2, 2, 1])
+        with w_col1:
+            w_warrant_price = st.number_input("Warrant Price", min_value=0.01, value=2.35, step=0.01, format="%.2f", key="w_warrant_price")
+        with w_col2:
+            w_warrant_ccy = st.selectbox("Warrant Currency", _CURRENCIES, index=1, key="w_warrant_ccy")
+        with w_col3:
+            w_strike = st.number_input("Strike Price", min_value=0.01, value=180.00, step=0.01, format="%.2f", key="w_strike")
+        with w_col4:
+            w_underlying = st.number_input("Underlying Price", min_value=0.01, value=185.00, step=0.01, format="%.2f", key="w_underlying")
+        with w_col5:
+            w_underlying_ccy = st.selectbox("Underlying Currency", _CURRENCIES, index=0, key="w_underlying_ccy")
+
+        w_col6, w_col7, w_col8, w_col9, w_col10 = st.columns([1, 2, 1, 1, 3])
+        with w_col6:
+            w_ratio = st.number_input("Ratio", min_value=0.001, value=0.10, step=0.01, format="%.3f", key="w_ratio")
+        with w_col7:
+            _default_expiry = date.today() + timedelta(days=365)
+            w_expiry = st.date_input("Expiry Date", value=_default_expiry, min_value=date.today(), key="w_expiry")
+        with w_col8:
+            w_rfr = st.number_input("Risk-Free Rate (%)", value=2.0, step=0.1, format="%.1f", key="w_rfr")
+        with w_col9:
+            w_option_type = st.selectbox("Type", ["Call", "Put"], index=0, key="w_option_type")
+        with w_col10:
+            st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+            w_submitted = st.form_submit_button("Calculate", use_container_width=True, type="primary")
+
+    # --- FX manual fallback — outside form so it persists across reruns ---
+    if w_underlying_ccy != w_warrant_ccy and st.session_state.get("w_fx_fallback"):
+        st.warning(f"Could not fetch FX rate for {w_underlying_ccy}/{w_warrant_ccy}. Enter manually:")
+        w_manual_fx = st.number_input(
+            f"FX Rate (1 {w_underlying_ccy} = ? {w_warrant_ccy})",
+            min_value=0.0001, value=1.0, step=0.0001, format="%.4f",
+            key="w_manual_fx",
+        )
+    else:
+        w_manual_fx = None
+
+    # --- Calculation (on submit or FX manual entry) ---
+    _fx_ready = w_manual_fx is not None and w_manual_fx > 0 and st.session_state.get("w_fx_fallback")
+    if w_submitted or _fx_ready:
+        today = date.today()
+        if w_expiry <= today:
+            st.error("Expiry date must be in the future.")
+        elif w_underlying_ccy != w_warrant_ccy and _fetch_fx_rate(w_underlying_ccy, w_warrant_ccy) is None and (w_manual_fx is None or w_manual_fx <= 0):
+            st.session_state["w_fx_fallback"] = True
+            st.error("Could not fetch FX rate. Please enter it manually above.")
+        else:
+            T = (w_expiry - today).days / 365.0
+            r = w_rfr / 100.0
+            opt = w_option_type.lower()
+
+            # FX handling
+            if w_underlying_ccy != w_warrant_ccy:
+                fx_rate = _fetch_fx_rate(w_underlying_ccy, w_warrant_ccy)
+                if fx_rate is None:
+                    fx_rate = w_manual_fx
+                st.session_state["w_fx_fallback"] = False
+            else:
+                fx_rate = None
+                st.session_state.pop("w_fx_fallback", None)
+
+            # Convert warrant price to underlying currency for IV solve
+            if fx_rate is not None and fx_rate != 1.0:
+                warrant_price_underlying = w_warrant_price / fx_rate
+            else:
+                warrant_price_underlying = w_warrant_price
+                fx_rate = 1.0
+
+            # Solve IV
+            try:
+                iv = implied_volatility(
+                    warrant_price_underlying, w_underlying, w_strike, T, r, opt, w_ratio
+                )
+            except ValueError as e:
+                st.error(str(e))
+                iv = None
+
+            if iv is not None:
+                # Store in session state for slider reactivity
+                days_to_expiry = (w_expiry - today).days
+                st.session_state["w_result"] = {
+                    "iv": iv,
+                    "S": w_underlying,
+                    "K": w_strike,
+                    "T": T,
+                    "r": r,
+                    "option_type": opt,
+                    "ratio": w_ratio,
+                    "fx_rate": fx_rate,
+                    "warrant_price": w_warrant_price,
+                    "underlying_ccy": w_underlying_ccy,
+                    "warrant_ccy": w_warrant_ccy,
+                    "expiry": w_expiry,
+                    "days_to_expiry": days_to_expiry,
+                }
+                # Explicitly reset Price Explorer sliders to defaults
+                st.session_state["w_exit_price"] = round(w_underlying, 2)
+                st.session_state["w_exit_days"] = 0
+                st.session_state["w_iv_slider"] = round(iv * 100, 1)
+                st.session_state["w_calc_count"] = st.session_state.get("w_calc_count", 0) + 1
+
+    # --- Results display ---
+    if st.session_state.get("w_result"):
+        wr = st.session_state["w_result"]
+
+        # --- Warrant Analytics ---
+        iv_pct = wr["iv"] * 100
+        sigma = wr["iv"]
+
+        st.subheader("Analytics")
+        g = greeks(wr["S"], wr["K"], wr["T"], wr["r"], sigma, wr["option_type"], wr["ratio"])
+
+        # Gear: underlying price / warrant price in underlying currency
+        warrant_price_ul = wr["warrant_price"] / wr["fx_rate"]
+        gear = (wr["S"] / warrant_price_ul) * wr["ratio"] if warrant_price_ul > 0 else 0
+
+        # Breakeven at expiry: strike + cost per unit (call) or strike - cost per unit (put)
+        cost_per_unit = warrant_price_ul / wr["ratio"] if wr["ratio"] > 0 else 0
+        if wr["option_type"] == "call":
+            breakeven = wr["K"] + cost_per_unit
+        else:
+            breakeven = wr["K"] - cost_per_unit
+
+        ccy_sym = {"USD": "$", "EUR": "\u20ac", "GBP": "\u00a3", "CHF": "CHF ", "JPY": "\u00a5"}.get(
+            wr["underlying_ccy"], ""
+        )
+
+        metric_configs = [
+            ("IV", iv_pct, "%", "#f59e0b", "%.1f"),
+            ("Gear", gear, "\u00d7 leverage", "#f97316", "%.2f"),
+            ("Breakeven", breakeven, f"{ccy_sym} at expiry", "#059669", "%.2f"),
+            ("Delta (\u0394)", g["delta"], "per warrant", "#14b8a6", "%.4f"),
+            ("Gamma (\u0393)", g["gamma"], "per warrant", "#8b5cf6", "%.4f"),
+            ("Theta (\u0398)", g["theta"], "per day", "#ef4444", "%.4f"),
+            ("Vega (\u03bd)", g["vega"], "per 1% vol", "#3b82f6", "%.4f"),
+            ("Rho (\u03c1)", g["rho"], "per 1% rate", "#06b6d4", "%.4f"),
+        ]
+
+        metric_cards = ""
+        for name, val, unit, color, fmt in metric_configs:
+            _n = html_mod.escape(name)
+            _u = html_mod.escape(unit)
+            _v = fmt % val
+            metric_cards += (
+                f"<div style='background:rgba(255,255,255,0.05);border-radius:8px;"
+                f"padding:16px;text-align:center;flex:1'>"
+                f"<div style='font-size:0.75rem;color:rgba(224,228,238,0.6);margin-bottom:6px'>{_n}</div>"
+                f"<div style='font-size:1.5rem;font-weight:700;color:{color}'>{_v}</div>"
+                f"<div style='font-size:0.7rem;color:rgba(224,228,238,0.4);margin-top:4px'>{_u}</div>"
+                f"</div>"
+            )
+
+        st.markdown(
+            f"<div style='display:flex;gap:12px'>{metric_cards}</div>",
+            unsafe_allow_html=True,
+        )
+
+        # --- Scenario Analysis (fragment for instant slider updates) ---
+        @st.fragment
+        def _scenario_fragment(calc_count: int):
+            _wr = st.session_state["w_result"]
+            _iv_pct = _wr["iv"] * 100
+            _days_to_expiry = _wr["days_to_expiry"]
+
+            # Initialize slider defaults in session state (first run only)
+            if "w_exit_price" not in st.session_state:
+                st.session_state["w_exit_price"] = round(_wr["S"], 2)
+            if "w_exit_days" not in st.session_state:
+                st.session_state["w_exit_days"] = 0
+            if "w_iv_slider" not in st.session_state:
+                st.session_state["w_iv_slider"] = round(_iv_pct, 1)
+
+            st.markdown("")  # spacing to match other sections
+            st.subheader("Price Explorer")
+            sc_left, sc_right = st.columns([3, 2])
+
+            with sc_left:
+                exit_price_min = round(_wr["S"] * 0.5, 2)
+                exit_price_max = round(_wr["S"] * 1.5, 2)
+                _exit_price = st.slider(
+                    f"Exit Underlying Price ({_wr['underlying_ccy']})",
+                    min_value=exit_price_min,
+                    max_value=exit_price_max,
+                    step=0.01,
+                    format="%.2f",
+                    key="w_exit_price",
+                )
+                _exit_days = st.slider(
+                    "Days to Expiry",
+                    min_value=0,
+                    max_value=max(_days_to_expiry, 1),
+                    step=1,
+                    key="w_exit_days",
+                )
+                _iv_slider = st.slider(
+                    "Implied Volatility",
+                    min_value=1.0, max_value=200.0,
+                    step=0.1,
+                    format="%.1f%%",
+                    key="w_iv_slider",
+                )
+
+            with sc_right:
+                # Compute scenario inside the column context so rendering stays side-by-side
+                _sigma = _iv_slider / 100.0
+                T_exit = max(_exit_days / 365.0, 0)
+
+                projected = scenario_price(
+                    _exit_price, T_exit, _wr["r"], _sigma, _wr["K"], _wr["option_type"], _wr["ratio"]
+                )
+
+                projected_warrant_ccy = round(projected * _wr["fx_rate"], 2)
+                appreciation = ((projected_warrant_ccy - _wr["warrant_price"]) / _wr["warrant_price"]) * 100
+                appreciation = round(appreciation, 1)
+                if appreciation == 0.0:
+                    appreciation = 0.0  # normalize -0.0 to 0.0
+
+                ccy_symbol = {"USD": "$", "EUR": "\u20ac", "GBP": "\u00a3", "CHF": "CHF ", "JPY": "\u00a5"}.get(
+                    _wr["warrant_ccy"], ""
+                )
+                appr_color = "#10b981" if appreciation > 0 else "#ef4444" if appreciation < 0 else "rgba(224,228,238,0.7)"
+                appr_sign = "+" if appreciation > 0 else ""
+                arrow = "&#9650;" if appreciation > 0 else "&#9660;" if appreciation < 0 else "&#9679;"
+
+                # Result cards — single HTML block to avoid extra Streamlit spacing
+                _appr_rgb = '16,185,129' if appreciation >= 0 else '239,68,68'
+                st.markdown(
+                    f"<div style='display:flex;flex-direction:column;gap:12px'>"
+                    # Projected price card
+                    f"<div style='background:rgba(255,255,255,0.06);border-radius:12px;"
+                    f"padding:20px;text-align:center;"
+                    f"border:1px solid rgba(255,255,255,0.08)'>"
+                    f"<div style='font-size:0.7rem;color:rgba(224,228,238,0.5);text-transform:uppercase;"
+                    f"letter-spacing:1px;margin-bottom:6px'>Projected Price</div>"
+                    f"<div style='font-size:2rem;font-weight:700;letter-spacing:-0.5px'>"
+                    f"{ccy_symbol}{projected_warrant_ccy:,.2f}</div>"
+                    f"</div>"
+                    # Appreciation card
+                    f"<div style='background:rgba({_appr_rgb},0.08);"
+                    f"border-radius:12px;padding:20px;text-align:center;"
+                    f"border:1px solid rgba({_appr_rgb},0.2)'>"
+                    f"<div style='font-size:0.7rem;color:rgba(224,228,238,0.5);text-transform:uppercase;"
+                    f"letter-spacing:1px;margin-bottom:6px'>Appreciation</div>"
+                    f"<div style='font-size:2rem;font-weight:700;color:{appr_color}'>"
+                    f"{arrow} {appr_sign}{appreciation:.1f}%</div>"
+                    f"</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+        _scenario_fragment(st.session_state.get("w_calc_count", 0))
