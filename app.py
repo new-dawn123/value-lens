@@ -1018,9 +1018,10 @@ with tab_warrant:
         st.subheader("Analytics")
         g = greeks(wr["S"], wr["K"], wr["T"], wr["r"], sigma, wr["option_type"], wr["ratio"])
 
-        # Gear: underlying price / warrant price in underlying currency
+        # Effective leverage (omega): gear × delta
         warrant_price_ul = wr["warrant_price"] / wr["fx_rate"]
         gear = (wr["S"] / warrant_price_ul) * wr["ratio"] if warrant_price_ul > 0 else 0
+        eff_leverage = abs(gear * g["delta"])
 
         # Breakeven at expiry: strike + cost per unit (call) or strike - cost per unit (put)
         cost_per_unit = warrant_price_ul / wr["ratio"] if wr["ratio"] > 0 else 0
@@ -1035,10 +1036,10 @@ with tab_warrant:
 
         metric_configs = [
             ("IV", iv_pct, "%", "#f59e0b", "%.1f"),
-            ("Gear", gear, "\u00d7 leverage", "#f97316", "%.2f"),
+            ("Leverage", eff_leverage, "\u00d7 multiplier", "#f97316", "%.2f"),
             ("Breakeven", breakeven, f"{ccy_sym} at expiry", "#059669", "%.2f"),
-            ("Delta (\u0394)", g["delta"], "per warrant", "#14b8a6", "%.4f"),
-            ("Gamma (\u0393)", g["gamma"], "per warrant", "#8b5cf6", "%.4f"),
+            ("Delta (\u0394)", g["delta"], "price sensitivity", "#14b8a6", "%.4f"),
+            ("Gamma (\u0393)", g["gamma"], "\u0394 change per $1", "#8b5cf6", "%.4f"),
             ("Theta (\u0398)", g["theta"], "per day", "#ef4444", "%.4f"),
             ("Vega (\u03bd)", g["vega"], "per 1% vol", "#3b82f6", "%.4f"),
             ("Rho (\u03c1)", g["rho"], "per 1% rate", "#06b6d4", "%.4f"),

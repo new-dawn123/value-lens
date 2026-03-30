@@ -55,11 +55,14 @@ def implied_volatility(market_price, S, K, T, r, option_type, ratio=1.0):
 
 
 def greeks(S, K, T, r, sigma, option_type, ratio=1.0):
-    """Compute ratio-adjusted Greeks for a warrant.
+    """Compute Greeks for a warrant.
+
+    Delta is the raw Black-Scholes delta (not ratio-adjusted), as is standard.
+    Other Greeks are ratio-adjusted to reflect per-warrant sensitivity.
 
     ratio : float – fraction of underlying per warrant (e.g. 0.1 means 10 warrants = 1 share)
 
-    Returns dict with delta, gamma, theta (per day), vega (per 1% vol),
+    Returns dict with delta (raw), gamma, theta (per day), vega (per 1% vol),
     rho (per 1% rate).
     """
     d1, d2 = _d1_d2(S, K, T, r, sigma)
@@ -85,8 +88,8 @@ def greeks(S, K, T, r, sigma, option_type, ratio=1.0):
     raw_vega = S * pdf_d1 * sqrt_T
 
     return {
-        "delta": raw_delta * ratio,
-        "gamma": raw_gamma * ratio,
+        "delta": raw_delta,  # raw BS delta, not ratio-adjusted
+        "gamma": raw_gamma,  # raw BS gamma (derivative of delta), not ratio-adjusted
         "theta": (raw_theta / 365) * ratio,
         "vega": (raw_vega / 100) * ratio,
         "rho": (raw_rho / 100) * ratio,
