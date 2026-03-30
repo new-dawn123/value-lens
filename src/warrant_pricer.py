@@ -1,6 +1,39 @@
 import math
 from scipy.stats import norm
 from scipy.optimize import brentq
+import yfinance as yf
+
+# Default short-term risk-free rates by currency (central bank policy rates)
+_DEFAULT_RATES = {
+    "USD": 3.6,
+    "EUR": 2.0,
+    "GBP": 3.75,
+    "JPY": 0.75,
+    "CHF": 0.0,
+}
+
+
+def get_risk_free_rate(currency="USD"):
+    """Fetch the risk-free rate for a given currency.
+
+    For USD, fetches the 13-week T-bill yield (^IRX) from yfinance.
+    For other currencies, returns a hardcoded default.
+    Falls back to the USD default if the fetch fails.
+
+    Returns rate as a percentage (e.g. 3.6 means 3.6%).
+    """
+    currency = currency.upper()
+
+    if currency == "USD":
+        try:
+            ticker = yf.Ticker("^IRX")
+            hist = ticker.history(period="5d")
+            if not hist.empty:
+                return round(float(hist["Close"].iloc[-1]), 2)
+        except Exception:
+            pass
+
+    return _DEFAULT_RATES.get(currency, _DEFAULT_RATES["USD"])
 
 
 def _d1_d2(S, K, T, r, sigma):

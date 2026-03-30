@@ -20,6 +20,7 @@ from src.valuator import (
 from datetime import date, timedelta
 
 from src.warrant_pricer import (
+    get_risk_free_rate,
     greeks,
     implied_volatility,
     scenario_price,
@@ -40,7 +41,7 @@ def cached_fetch(ticker: str, cache_version: int = 0) -> dict:
     return fetch_stock_data(ticker)
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_fx_rate(from_ccy: str, to_ccy: str) -> float | None:
     """Fetch FX rate via yfinance. Returns rate such that 1 from_ccy = rate to_ccy."""
     if from_ccy == to_ccy:
@@ -62,6 +63,11 @@ def _fetch_fx_rate(from_ccy: str, to_ccy: str) -> float | None:
     except Exception:
         pass
     return None
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _get_risk_free_rate(currency: str) -> float:
+    return get_risk_free_rate(currency)
 
 
 # ---------------------------------------------------------------------------
@@ -905,107 +911,103 @@ _CURRENCIES = ["USD", "EUR", "GBP", "CHF", "JPY"]
 with tab_warrant:
     st.subheader("Warrant Analysis")
 
-    with st.form("warrant_form"):
-        w_col1, w_col2, w_col3, w_col4, w_col5 = st.columns([2, 1, 2, 2, 1])
-        with w_col1:
-            w_warrant_price = st.number_input("Warrant Price", min_value=0.01, value=2.35, step=0.01, format="%.2f", key="w_warrant_price")
-        with w_col2:
-            w_warrant_ccy = st.selectbox("Warrant Currency", _CURRENCIES, index=1, key="w_warrant_ccy")
-        with w_col3:
-            w_strike = st.number_input("Strike Price", min_value=0.01, value=180.00, step=0.01, format="%.2f", key="w_strike")
-        with w_col4:
-            w_underlying = st.number_input("Underlying Price", min_value=0.01, value=185.00, step=0.01, format="%.2f", key="w_underlying")
-        with w_col5:
-            w_underlying_ccy = st.selectbox("Underlying Currency", _CURRENCIES, index=0, key="w_underlying_ccy")
+    @st.fragment
+    def _warrant_inputs():
+        with st.container(border=True):
+            w_col1, w_col2, w_col3, w_col4, w_col5 = st.columns([2, 1, 2, 2, 1])
+            with w_col1:
+                w_warrant_price = st.number_input("Warrant Price", min_value=0.01, value=2.35, step=0.01, format="%.2f", key="w_warrant_price")
+            with w_col2:
+                w_warrant_ccy = st.selectbox("Warrant Currency", _CURRENCIES, index=1, key="w_warrant_ccy")
+            with w_col3:
+                w_strike = st.number_input("Strike Price", min_value=0.01, value=180.00, step=0.01, format="%.2f", key="w_strike")
+            with w_col4:
+                w_underlying = st.number_input("Underlying Price", min_value=0.01, value=185.00, step=0.01, format="%.2f", key="w_underlying")
+            with w_col5:
+                w_underlying_ccy = st.selectbox("Underlying Currency", _CURRENCIES, index=0, key="w_underlying_ccy")
 
-        w_col6, w_col7, w_col8, w_col9, w_col10 = st.columns([1, 2, 1, 1, 3])
-        with w_col6:
-            w_ratio = st.number_input("Ratio", min_value=0.001, value=0.10, step=0.01, format="%.3f", key="w_ratio")
-        with w_col7:
-            _default_expiry = date.today() + timedelta(days=365)
-            w_expiry = st.date_input("Expiry Date", value=_default_expiry, min_value=date.today(), key="w_expiry")
-        with w_col8:
-            w_rfr = st.number_input("Risk-Free Rate (%)", value=2.0, step=0.1, format="%.1f", key="w_rfr")
-        with w_col9:
-            w_option_type = st.selectbox("Type", ["Call", "Put"], index=0, key="w_option_type")
-        with w_col10:
-            st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
-            w_submitted = st.form_submit_button("Calculate", use_container_width=True, type="primary")
+            w_col6, w_col7, w_col8, w_col9, w_col10 = st.columns([1, 2, 1, 1, 3])
+            with w_col6:
+                w_ratio = st.number_input("Ratio", min_value=0.001, value=0.10, step=0.01, format="%.3f", key="w_ratio")
+            with w_col7:
+                _default_expiry = date.today() + timedelta(days=365)
+                w_expiry = st.date_input("Expiry Date", value=_default_expiry, min_value=date.today(), key="w_expiry")
+            # Auto-update risk-free rate when underlying currency changes
+            _prev_ccy = st.session_state.get("_w_prev_underlying_ccy", "USD")
+            if w_underlying_ccy != _prev_ccy:
+                st.session_state["_w_prev_underlying_ccy"] = w_underlying_ccy
+                st.session_state["w_rfr"] = _get_risk_free_rate(w_underlying_ccy)
 
-    # --- FX manual fallback — outside form so it persists across reruns ---
-    if w_underlying_ccy != w_warrant_ccy and st.session_state.get("w_fx_fallback"):
-        st.warning(f"Could not fetch FX rate for {w_underlying_ccy}/{w_warrant_ccy}. Enter manually:")
-        w_manual_fx = st.number_input(
-            f"FX Rate (1 {w_underlying_ccy} = ? {w_warrant_ccy})",
-            min_value=0.0001, value=1.0, step=0.0001, format="%.4f",
-            key="w_manual_fx",
-        )
-    else:
-        w_manual_fx = None
+            with w_col8:
+                if "w_rfr" not in st.session_state:
+                    st.session_state["w_rfr"] = _get_risk_free_rate(w_underlying_ccy)
+                w_rfr = st.number_input("Risk-Free Rate (%)", step=0.01, format="%.2f", key="w_rfr")
+            with w_col9:
+                w_option_type = st.selectbox("Type", ["Call", "Put"], index=0, key="w_option_type")
+            with w_col10:
+                st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+                w_submitted = st.button("Calculate", use_container_width=True, type="primary")
 
-    # --- Calculation (on submit or FX manual entry) ---
-    _fx_ready = w_manual_fx is not None and w_manual_fx > 0 and st.session_state.get("w_fx_fallback")
-    if w_submitted or _fx_ready:
-        today = date.today()
-        if w_expiry <= today:
-            st.error("Expiry date must be in the future.")
-        elif w_underlying_ccy != w_warrant_ccy and _fetch_fx_rate(w_underlying_ccy, w_warrant_ccy) is None and (w_manual_fx is None or w_manual_fx <= 0):
-            st.session_state["w_fx_fallback"] = True
-            st.error("Could not fetch FX rate. Please enter it manually above.")
-        else:
-            T = (w_expiry - today).days / 365.0
-            r = w_rfr / 100.0
-            opt = w_option_type.lower()
-
-            # FX handling
-            if w_underlying_ccy != w_warrant_ccy:
-                fx_rate = _fetch_fx_rate(w_underlying_ccy, w_warrant_ccy)
-                if fx_rate is None:
-                    fx_rate = w_manual_fx
-                st.session_state["w_fx_fallback"] = False
+        # --- Calculation ---
+        if w_submitted:
+            today = date.today()
+            if w_expiry <= today:
+                st.error("Expiry date must be in the future.")
+            elif w_underlying_ccy != w_warrant_ccy and _fetch_fx_rate(w_underlying_ccy, w_warrant_ccy) is None:
+                st.error(f"Could not fetch FX rate for {w_underlying_ccy}/{w_warrant_ccy}.")
             else:
-                fx_rate = None
-                st.session_state.pop("w_fx_fallback", None)
+                T = (w_expiry - today).days / 365.0
+                r = w_rfr / 100.0
+                opt = w_option_type.lower()
 
-            # Convert warrant price to underlying currency for IV solve
-            if fx_rate is not None and fx_rate != 1.0:
-                warrant_price_underlying = w_warrant_price / fx_rate
-            else:
-                warrant_price_underlying = w_warrant_price
-                fx_rate = 1.0
+                # FX handling
+                if w_underlying_ccy != w_warrant_ccy:
+                    fx_rate = _fetch_fx_rate(w_underlying_ccy, w_warrant_ccy)
+                else:
+                    fx_rate = None
 
-            # Solve IV
-            try:
-                iv = implied_volatility(
-                    warrant_price_underlying, w_underlying, w_strike, T, r, opt, w_ratio
-                )
-            except ValueError as e:
-                st.error(str(e))
-                iv = None
+                # Convert warrant price to underlying currency for IV solve
+                if fx_rate is not None and fx_rate != 1.0:
+                    warrant_price_underlying = w_warrant_price / fx_rate
+                else:
+                    warrant_price_underlying = w_warrant_price
+                    fx_rate = 1.0
 
-            if iv is not None:
-                # Store in session state for slider reactivity
-                days_to_expiry = (w_expiry - today).days
-                st.session_state["w_result"] = {
-                    "iv": iv,
-                    "S": w_underlying,
-                    "K": w_strike,
-                    "T": T,
-                    "r": r,
-                    "option_type": opt,
-                    "ratio": w_ratio,
-                    "fx_rate": fx_rate,
-                    "warrant_price": w_warrant_price,
-                    "underlying_ccy": w_underlying_ccy,
-                    "warrant_ccy": w_warrant_ccy,
-                    "expiry": w_expiry,
-                    "days_to_expiry": days_to_expiry,
-                }
-                # Explicitly reset Price Explorer sliders to defaults
-                st.session_state["w_exit_price"] = round(w_underlying, 2)
-                st.session_state["w_exit_days"] = 0
-                st.session_state["w_iv_slider"] = round(iv * 100, 1)
-                st.session_state["w_calc_count"] = st.session_state.get("w_calc_count", 0) + 1
+                # Solve IV
+                try:
+                    iv = implied_volatility(
+                        warrant_price_underlying, w_underlying, w_strike, T, r, opt, w_ratio
+                    )
+                except ValueError as e:
+                    st.error(str(e))
+                    iv = None
+
+                if iv is not None:
+                    # Store in session state for slider reactivity
+                    days_to_expiry = (w_expiry - today).days
+                    st.session_state["w_result"] = {
+                        "iv": iv,
+                        "S": w_underlying,
+                        "K": w_strike,
+                        "T": T,
+                        "r": r,
+                        "option_type": opt,
+                        "ratio": w_ratio,
+                        "fx_rate": fx_rate,
+                        "warrant_price": w_warrant_price,
+                        "underlying_ccy": w_underlying_ccy,
+                        "warrant_ccy": w_warrant_ccy,
+                        "expiry": w_expiry,
+                        "days_to_expiry": days_to_expiry,
+                    }
+                    # Explicitly reset Price Explorer sliders to defaults
+                    st.session_state["w_exit_price"] = round(w_underlying, 2)
+                    st.session_state["w_exit_days"] = 0
+                    st.session_state["w_iv_slider"] = round(iv * 100, 1)
+                    st.session_state["w_calc_count"] = st.session_state.get("w_calc_count", 0) + 1
+                    st.rerun()
+
+    _warrant_inputs()
 
     # --- Results display ---
     if st.session_state.get("w_result"):
